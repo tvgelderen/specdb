@@ -1,4 +1,4 @@
-import { AlertTriangleIcon, Loader2Icon, Trash2Icon } from "lucide-react";
+import { AlertTriangleIcon, Loader2Icon, TrashIcon } from "lucide-react";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -30,8 +30,8 @@ export function DeleteConfirmationDialog({
 						Delete Row
 					</AlertDialogTitle>
 					<AlertDialogDescription>
-						Are you sure you want to delete this row from the <span className="font-medium">{tableName}</span>{" "}
-						table? This action cannot be undone.
+						Are you sure you want to delete this row from the{" "}
+						<span className="font-medium">{tableName}</span> table? This action cannot be undone.
 					</AlertDialogDescription>
 				</AlertDialogHeader>
 				<AlertDialogFooter>
@@ -51,7 +51,7 @@ export function DeleteConfirmationDialog({
 							</>
 						) : (
 							<>
-								<Trash2Icon className="size-4" />
+								<TrashIcon />
 								Delete Row
 							</>
 						)}

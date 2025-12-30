@@ -200,6 +200,49 @@ const hasActiveConnectionInput = z.object({
 });
 
 /**
+ * Input schema for renameDatabase
+ */
+const renameDatabaseInput = z.object({
+	connectionId: z.string().optional(),
+	oldName: z.string().min(1),
+	newName: z.string().min(1),
+	/** If true, terminate existing connections before renaming */
+	force: z.boolean().optional().default(false),
+});
+
+/**
+ * Input schema for createDatabase
+ */
+const createDatabaseInput = z.object({
+	connectionId: z.string().optional(),
+	databaseName: z.string().min(1),
+	/** Optional owner for the new database */
+	owner: z.string().optional(),
+	/** Optional encoding (defaults to UTF8) */
+	encoding: z.string().optional(),
+	/** Optional template database (defaults to template1) */
+	template: z.string().optional(),
+});
+
+/**
+ * Input schema for deleteDatabase
+ */
+const deleteDatabaseInput = z.object({
+	connectionId: z.string().optional(),
+	databaseName: z.string().min(1),
+	/** If true, terminate existing connections before deleting */
+	force: z.boolean().optional().default(false),
+});
+
+/**
+ * Input schema for getDatabaseConnections
+ */
+const getDatabaseConnectionsInput = z.object({
+	connectionId: z.string().optional(),
+	databaseName: z.string().min(1),
+});
+
+/**
  * Explorer router with tree population procedures
  */
 export const explorerRouter = router({
@@ -543,6 +586,213 @@ export const explorerRouter = router({
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
 					message: "Failed to get table structure",
+					cause: error,
+				});
+			} finally {
+				if (provider) {
+					await provider.disconnect().catch((err) => {
+						logger.warn("[Explorer] Failed to disconnect provider", err);
+					});
+				}
+			}
+		}),
+
+	/**
+	 * Get active connections to a database
+	 */
+	getDatabaseConnections: publicProcedure
+		.use(logging)
+		.use(rateLimit({ limit: 100, windowInSeconds: 60 }))
+		.use(withUserContext)
+		.use(requirePermission("explorer.databases.list"))
+		.input(getDatabaseConnectionsInput)
+		.query(async ({ input }) => {
+			const startTime = Date.now();
+			logger.info("[Explorer] getDatabaseConnections called", {
+				connectionId: input.connectionId,
+				databaseName: input.databaseName,
+			});
+
+			let provider: PostgresProvider | null = null;
+			try {
+				provider = await getProvider(input.connectionId);
+
+				const result = await provider.getDatabaseConnections(input.databaseName);
+
+				logger.info("[Explorer] getDatabaseConnections completed", {
+					databaseName: input.databaseName,
+					connectionCount: result.count,
+					durationMs: Date.now() - startTime,
+				});
+
+				return {
+					...result,
+					databaseName: input.databaseName,
+					timestamp: Date.now(),
+				};
+			} catch (error) {
+				logger.error("[Explorer] getDatabaseConnections failed", error);
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: `Failed to get database connections: ${error instanceof Error ? error.message : "Unknown error"}`,
+					cause: error,
+				});
+			} finally {
+				if (provider) {
+					await provider.disconnect().catch((err) => {
+						logger.warn("[Explorer] Failed to disconnect provider", err);
+					});
+				}
+			}
+		}),
+
+	/**
+	 * Create a new database
+	 */
+	createDatabase: publicProcedure
+		.use(logging)
+		.use(rateLimit({ limit: 10, windowInSeconds: 60 }))
+		.use(withUserContext)
+		.use(requirePermission("explorer.databases.write"))
+		.input(createDatabaseInput)
+		.mutation(async ({ input }) => {
+			const startTime = Date.now();
+			logger.info("[Explorer] createDatabase called", {
+				connectionId: input.connectionId,
+				databaseName: input.databaseName,
+				owner: input.owner,
+				encoding: input.encoding,
+				template: input.template,
+			});
+
+			let provider: PostgresProvider | null = null;
+			try {
+				provider = await getProvider(input.connectionId);
+
+				await provider.createDatabase(input.databaseName, {
+					owner: input.owner,
+					encoding: input.encoding,
+					template: input.template,
+				});
+
+				logger.info("[Explorer] createDatabase completed", {
+					databaseName: input.databaseName,
+					durationMs: Date.now() - startTime,
+				});
+
+				return {
+					success: true,
+					databaseName: input.databaseName,
+					timestamp: Date.now(),
+				};
+			} catch (error) {
+				logger.error("[Explorer] createDatabase failed", error);
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: `Failed to create database: ${error instanceof Error ? error.message : "Unknown error"}`,
+					cause: error,
+				});
+			} finally {
+				if (provider) {
+					await provider.disconnect().catch((err) => {
+						logger.warn("[Explorer] Failed to disconnect provider", err);
+					});
+				}
+			}
+		}),
+
+	/**
+	 * Rename a database
+	 */
+	renameDatabase: publicProcedure
+		.use(logging)
+		.use(rateLimit({ limit: 20, windowInSeconds: 60 }))
+		.use(withUserContext)
+		.use(requirePermission("explorer.databases.write"))
+		.input(renameDatabaseInput)
+		.mutation(async ({ input }) => {
+			const startTime = Date.now();
+			logger.info("[Explorer] renameDatabase called", {
+				connectionId: input.connectionId,
+				oldName: input.oldName,
+				newName: input.newName,
+				force: input.force,
+			});
+
+			let provider: PostgresProvider | null = null;
+			try {
+				provider = await getProvider(input.connectionId);
+
+				await provider.renameDatabase(input.oldName, input.newName, input.force);
+
+				logger.info("[Explorer] renameDatabase completed", {
+					oldName: input.oldName,
+					newName: input.newName,
+					force: input.force,
+					durationMs: Date.now() - startTime,
+				});
+
+				return {
+					success: true,
+					oldName: input.oldName,
+					newName: input.newName,
+					timestamp: Date.now(),
+				};
+			} catch (error) {
+				logger.error("[Explorer] renameDatabase failed", error);
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: `Failed to rename database: ${error instanceof Error ? error.message : "Unknown error"}`,
+					cause: error,
+				});
+			} finally {
+				if (provider) {
+					await provider.disconnect().catch((err) => {
+						logger.warn("[Explorer] Failed to disconnect provider", err);
+					});
+				}
+			}
+		}),
+
+	/**
+	 * Delete a database
+	 */
+	deleteDatabase: publicProcedure
+		.use(logging)
+		.use(rateLimit({ limit: 10, windowInSeconds: 60 }))
+		.use(withUserContext)
+		.use(requirePermission("explorer.databases.write"))
+		.input(deleteDatabaseInput)
+		.mutation(async ({ input }) => {
+			const startTime = Date.now();
+			logger.info("[Explorer] deleteDatabase called", {
+				connectionId: input.connectionId,
+				databaseName: input.databaseName,
+				force: input.force,
+			});
+
+			let provider: PostgresProvider | null = null;
+			try {
+				provider = await getProvider(input.connectionId);
+
+				await provider.deleteDatabase(input.databaseName, input.force);
+
+				logger.info("[Explorer] deleteDatabase completed", {
+					databaseName: input.databaseName,
+					force: input.force,
+					durationMs: Date.now() - startTime,
+				});
+
+				return {
+					success: true,
+					databaseName: input.databaseName,
+					timestamp: Date.now(),
+				};
+			} catch (error) {
+				logger.error("[Explorer] deleteDatabase failed", error);
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: `Failed to delete database: ${error instanceof Error ? error.message : "Unknown error"}`,
 					cause: error,
 				});
 			} finally {

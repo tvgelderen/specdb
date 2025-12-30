@@ -1,9 +1,12 @@
 import * as React from "react";
 import { createFileRoute, Outlet } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Header } from "~/components/header";
 import { ExplorerSidebar, useExplorerSidebar } from "~/components/explorer";
+import { CreateDatabaseDialog } from "~/components/explorer/create-database-dialog";
 import { useTableSelection } from "~/providers/table-selection-provider";
+import { useTRPC } from "~/trpc/react";
 import { cn } from "~/lib/utils";
 
 export const Route = createFileRoute("/_layout")({
@@ -12,6 +15,7 @@ export const Route = createFileRoute("/_layout")({
 
 function RouteComponent() {
 	const queryClient = useQueryClient();
+	const trpc = useTRPC();
 	const { setSelectedTable } = useTableSelection();
 	const {
 		isCollapsed,
@@ -26,6 +30,40 @@ function RouteComponent() {
 		isResizing,
 		resizeHandleProps,
 	} = useExplorerSidebar();
+
+	// Create database dialog state
+	const [createDialogOpen, setCreateDialogOpen] = React.useState(false);
+
+	// Check if there's an active connection
+	const activeConnectionQuery = useQuery(
+		trpc.explorer.hasActiveConnection.queryOptions({})
+	);
+	const hasActiveConnection = activeConnectionQuery.data?.hasConnection ?? false;
+
+	// Create database mutation
+	const createDatabaseMutation = useMutation(
+		trpc.explorer.createDatabase.mutationOptions({
+			onSuccess: (data) => {
+				toast.success(`Database "${data.databaseName}" created successfully`);
+				setCreateDialogOpen(false);
+				// Invalidate the databases query to refresh the list
+				queryClient.invalidateQueries({
+					queryKey: trpc.explorer.listDatabases.queryKey(),
+				});
+			},
+			onError: (error) => {
+				toast.error(`Failed to create database: ${error.message}`);
+			},
+		})
+	);
+
+	// Handle create database
+	const handleCreateDatabase = React.useCallback(
+		(databaseName: string) => {
+			createDatabaseMutation.mutate({ databaseName });
+		},
+		[createDatabaseMutation]
+	);
 
 	// Handle node selection
 	const handleNodeSelect = React.useCallback(
@@ -68,9 +106,20 @@ function RouteComponent() {
 
 	// Handle refresh
 	const handleRefresh = React.useCallback(() => {
-		// Invalidate all explorer queries to refetch fresh data
-		queryClient.invalidateQueries({ queryKey: ["explorer"] });
-	}, [queryClient]);
+		// Invalidate specific explorer queries using proper TRPC query keys to refetch fresh data
+		queryClient.invalidateQueries({
+			queryKey: trpc.explorer.listDatabases.queryKey(),
+		});
+		queryClient.invalidateQueries({
+			queryKey: trpc.explorer.listSchemas.queryKey(),
+		});
+		queryClient.invalidateQueries({
+			queryKey: trpc.explorer.listTables.queryKey(),
+		});
+		queryClient.invalidateQueries({
+			queryKey: trpc.explorer.hasActiveConnection.queryKey(),
+		});
+	}, [queryClient, trpc.explorer.listDatabases, trpc.explorer.listSchemas, trpc.explorer.listTables, trpc.explorer.hasActiveConnection]);
 
 	// Handle keyboard shortcut for sidebar toggle
 	React.useEffect(() => {
@@ -112,6 +161,8 @@ function RouteComponent() {
 					onToggleCollapse={toggleCollapse}
 					onCloseMobile={closeMobile}
 					onRefresh={handleRefresh}
+					onCreateDatabase={() => setCreateDialogOpen(true)}
+					hasActiveConnection={hasActiveConnection}
 					width={isMobileOpen ? undefined : width}
 					isResizing={isResizing}
 					resizeHandleProps={isMobileOpen ? undefined : resizeHandleProps}
@@ -127,6 +178,14 @@ function RouteComponent() {
 					<Outlet />
 				</main>
 			</div>
+
+			{/* Create Database Dialog */}
+			<CreateDatabaseDialog
+				open={createDialogOpen}
+				onOpenChange={setCreateDialogOpen}
+				onConfirm={handleCreateDatabase}
+				isCreating={createDatabaseMutation.isPending}
+			/>
 		</div>
 	);
 }

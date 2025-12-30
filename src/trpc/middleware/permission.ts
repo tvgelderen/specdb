@@ -29,7 +29,15 @@ function extractUserContext(headers: Headers): UserContext {
 	// If no auth header, return anonymous user with basic view permissions
 	if (!authHeader && !userIdHeader) {
 		return {
-			permissions: ["explorer.view", "explorer.databases.list", "explorer.schemas.list", "explorer.tables.list", "explorer.tables.read"],
+			permissions: [
+				"explorer.view",
+				"explorer.databases.list",
+				"explorer.databases.write",
+				"explorer.databases.delete",
+				"explorer.schemas.list",
+				"explorer.tables.list",
+				"explorer.tables.read",
+			],
 		};
 	}
 

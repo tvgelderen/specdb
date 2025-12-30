@@ -1,5 +1,6 @@
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { useTRPC } from "~/trpc/react";
 import { useLocalStorageSet } from "~/lib/hooks";
 import {
@@ -10,6 +11,9 @@ import {
 	TreeLoadMore,
 } from "./tree-node";
 import { usePrefetchExplorerData } from "./use-prefetch-explorer-data";
+import { DatabaseContextMenu } from "./database-context-menu";
+import { RenameDatabaseDialog } from "./rename-database-dialog";
+import { DeleteDatabaseDialog } from "./delete-database-dialog";
 import type {
 	ExplorerDatabaseInfo,
 	ExplorerSchemaInfo,
@@ -231,6 +235,22 @@ function DatabaseNode({
 	prefetchTablesForSchemas,
 }: DatabaseNodeProps) {
 	const trpc = useTRPC();
+	const queryClient = useQueryClient();
+
+	// Dialog states
+	const [renameDialogOpen, setRenameDialogOpen] = React.useState(false);
+	const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
+
+	// Query for active connections - enabled when dialogs are open
+	const connectionsQuery = useQuery({
+		...trpc.explorer.getDatabaseConnections.queryOptions({
+			connectionId,
+			databaseName: database.name,
+		}),
+		enabled: renameDialogOpen || deleteDialogOpen,
+		// Refetch every 5 seconds while dialog is open to keep connection info fresh
+		refetchInterval: (renameDialogOpen || deleteDialogOpen) ? 5000 : false,
+	});
 
 	// Lazy load schemas only when expanded
 	const schemasQuery = useQuery({
@@ -245,6 +265,65 @@ function DatabaseNode({
 	const isSchemasLoading = schemasQuery.isLoading && isExpanded;
 	const schemasError = schemasQuery.error;
 
+	// Rename database mutation
+	const renameMutation = useMutation(
+		trpc.explorer.renameDatabase.mutationOptions({
+			onSuccess: (data) => {
+				toast.success(`Database renamed to "${data.newName}"`);
+				setRenameDialogOpen(false);
+				// Invalidate the databases query to refresh the list
+				queryClient.invalidateQueries({
+					queryKey: trpc.explorer.listDatabases.queryKey(),
+				});
+			},
+			onError: (error) => {
+				toast.error(`Failed to rename database: ${error.message}`);
+			},
+		})
+	);
+
+	// Delete database mutation
+	const deleteMutation = useMutation(
+		trpc.explorer.deleteDatabase.mutationOptions({
+			onSuccess: (data) => {
+				toast.success(`Database "${data.databaseName}" deleted`);
+				setDeleteDialogOpen(false);
+				// Invalidate the databases query to refresh the list
+				queryClient.invalidateQueries({
+					queryKey: trpc.explorer.listDatabases.queryKey(),
+				});
+			},
+			onError: (error) => {
+				toast.error(`Failed to delete database: ${error.message}`);
+			},
+		})
+	);
+
+	// Handle rename confirm
+	const handleRenameConfirm = React.useCallback(
+		(newName: string, force: boolean) => {
+			renameMutation.mutate({
+				connectionId,
+				oldName: database.name,
+				newName,
+				force,
+			});
+		},
+		[renameMutation, connectionId, database.name]
+	);
+
+	// Handle delete confirm
+	const handleDeleteConfirm = React.useCallback(
+		(force: boolean) => {
+			deleteMutation.mutate({
+				connectionId,
+				databaseName: database.name,
+				force,
+			});
+		},
+		[deleteMutation, connectionId, database.name]
+	);
+
 	// Prefetch tables for all schemas when schemas are loaded
 	// This is triggered when the database is expanded and schemas are fetched
 	React.useEffect(() => {
@@ -254,81 +333,114 @@ function DatabaseNode({
 	}, [schemas, isSchemasLoading, schemasError, prefetchTablesForSchemas]);
 
 	return (
-		<TreeNode
-			id={database.treeMeta.id}
-			label={database.name}
-			treeMeta={database.treeMeta}
-			depth={0}
-			isExpanded={isExpanded}
-			isSelected={isSelected}
-			isLoading={isSchemasLoading}
-			hasError={!!schemasError && !isPermissionError(schemasError)}
-			onToggle={onToggle}
-			onSelect={onSelect}
-		>
-			{/* Loading state */}
-			{isSchemasLoading && <TreeNodeSkeleton count={3} depth={1} />}
+		<>
+			<TreeNode
+				id={database.treeMeta.id}
+				label={database.name}
+				treeMeta={database.treeMeta}
+				depth={0}
+				isExpanded={isExpanded}
+				isSelected={isSelected}
+				isLoading={isSchemasLoading}
+				hasError={!!schemasError && !isPermissionError(schemasError)}
+				onToggle={onToggle}
+				onSelect={onSelect}
+				actions={
+					<DatabaseContextMenu
+						databaseName={database.name}
+						onRename={() => setRenameDialogOpen(true)}
+						onDelete={() => setDeleteDialogOpen(true)}
+					/>
+				}
+			>
+				{/* Loading state */}
+				{isSchemasLoading && <TreeNodeSkeleton count={3} depth={1} />}
 
-			{/* Permission error - graceful degradation */}
-			{schemasError && isPermissionError(schemasError) && (
-				<PermissionDeniedNode
-					message="Permission denied to view schemas"
-					depth={1}
-				/>
-			)}
+				{/* Permission error - graceful degradation */}
+				{schemasError && isPermissionError(schemasError) && (
+					<PermissionDeniedNode
+						message="Permission denied to view schemas"
+						depth={1}
+					/>
+				)}
 
-			{/* Other errors */}
-			{schemasError && !isPermissionError(schemasError) && (
-				<TreeNodeError
-					message={getErrorMessage(schemasError, "schemas")}
-					depth={1}
-					onRetry={() => schemasQuery.refetch()}
-				/>
-			)}
+				{/* Other errors */}
+				{schemasError && !isPermissionError(schemasError) && (
+					<TreeNodeError
+						message={getErrorMessage(schemasError, "schemas")}
+						depth={1}
+						onRetry={() => schemasQuery.refetch()}
+					/>
+				)}
 
-			{/* Empty state */}
-			{!isSchemasLoading && !schemasError && schemas.length === 0 && isExpanded && (
-				<TreeNodeEmpty message="No schemas" depth={1} />
-			)}
+				{/* Empty state */}
+				{!isSchemasLoading && !schemasError && schemas.length === 0 && isExpanded && (
+					<TreeNodeEmpty message="No schemas" depth={1} />
+				)}
 
-			{/* Schema nodes */}
-			{schemas.map((schema) => (
-				<SchemaNode
-					key={schema.treeMeta.id}
-					schema={schema}
-					connectionId={connectionId}
-					isExpanded={expandedNodes.has(schema.treeMeta.id)}
-					isSelected={selectedNodeId === schema.treeMeta.id}
-					onToggle={() => toggleNode(schema.treeMeta.id)}
-					onSelect={() =>
-						onNodeSelect?.({
-							type: "schema",
-							database: database.name,
-							schema: schema.name,
-						})
-					}
-					onNodeSelect={onNodeSelect}
-					selectedNodeId={selectedNodeId}
-				/>
-			))}
+				{/* Schema nodes */}
+				{schemas.map((schema) => (
+					<SchemaNode
+						key={schema.treeMeta.id}
+						schema={schema}
+						connectionId={connectionId}
+						isExpanded={expandedNodes.has(schema.treeMeta.id)}
+						isSelected={selectedNodeId === schema.treeMeta.id}
+						onToggle={() => toggleNode(schema.treeMeta.id)}
+						onSelect={() =>
+							onNodeSelect?.({
+								type: "schema",
+								database: database.name,
+								schema: schema.name,
+							})
+						}
+						onNodeSelect={onNodeSelect}
+						selectedNodeId={selectedNodeId}
+					/>
+				))}
 
-			{/* Load more schemas */}
-			{schemasQuery.data?.pagination.hasMore && (
-				<TreeLoadMore
-					remaining={
-						schemasQuery.data.pagination.total -
-						schemasQuery.data.pagination.offset -
-						schemas.length
-					}
-					depth={1}
-					isLoading={false}
-					onLoadMore={() => {
-						// TODO: Implement pagination loading
-						console.log("Load more schemas");
-					}}
-				/>
-			)}
-		</TreeNode>
+				{/* Load more schemas */}
+				{schemasQuery.data?.pagination.hasMore && (
+					<TreeLoadMore
+						remaining={
+							schemasQuery.data.pagination.total -
+							schemasQuery.data.pagination.offset -
+							schemas.length
+						}
+						depth={1}
+						isLoading={false}
+						onLoadMore={() => {
+							// TODO: Implement pagination loading
+							console.log("Load more schemas");
+						}}
+					/>
+				)}
+			</TreeNode>
+
+			{/* Rename Database Dialog */}
+			<RenameDatabaseDialog
+				open={renameDialogOpen}
+				onOpenChange={setRenameDialogOpen}
+				databaseName={database.name}
+				onConfirm={handleRenameConfirm}
+				isRenaming={renameMutation.isPending}
+				isCheckingConnections={connectionsQuery.isLoading}
+				activeConnectionCount={connectionsQuery.data?.count ?? 0}
+				activeConnections={connectionsQuery.data?.connections ?? []}
+			/>
+
+			{/* Delete Database Dialog */}
+			<DeleteDatabaseDialog
+				open={deleteDialogOpen}
+				onOpenChange={setDeleteDialogOpen}
+				databaseName={database.name}
+				onConfirm={handleDeleteConfirm}
+				isDeleting={deleteMutation.isPending}
+				isCheckingConnections={connectionsQuery.isLoading}
+				activeConnectionCount={connectionsQuery.data?.count ?? 0}
+				activeConnections={connectionsQuery.data?.connections ?? []}
+			/>
+		</>
 	);
 }
 

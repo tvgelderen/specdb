@@ -800,4 +800,201 @@ export class PostgresProvider {
 
 		return retryableErrorCodes.has(err.code);
 	}
+
+	/**
+	 * Get active connections to a specific database (excluding the current connection)
+	 * Returns the count of connections and details about each connection
+	 */
+	async getDatabaseConnections(databaseName: string): Promise<{
+		count: number;
+		connections: Array<{
+			pid: number;
+			username: string;
+			applicationName: string | null;
+			clientAddr: string | null;
+			state: string | null;
+			queryStart: Date | null;
+		}>;
+	}> {
+		const result = await this.query<{
+			pid: number;
+			usename: string;
+			application_name: string | null;
+			client_addr: string | null;
+			state: string | null;
+			query_start: Date | null;
+		}>(
+			`
+			SELECT
+				pid,
+				usename,
+				application_name,
+				client_addr::text,
+				state,
+				query_start
+			FROM pg_stat_activity
+			WHERE datname = $1
+			AND pid <> pg_backend_pid()
+			ORDER BY query_start DESC NULLS LAST
+			`,
+			[databaseName]
+		);
+
+		return {
+			count: result.rows.length,
+			connections: result.rows.map((row) => ({
+				pid: row.pid,
+				username: row.usename,
+				applicationName: row.application_name,
+				clientAddr: row.client_addr,
+				state: row.state,
+				queryStart: row.query_start,
+			})),
+		};
+	}
+
+	/**
+	 * Rename a database
+	 * Note: This requires that no one is connected to the database being renamed
+	 * @param force - If true, terminate existing connections before renaming
+	 */
+	async renameDatabase(oldName: string, newName: string, force = false): Promise<void> {
+		// Validate database names to prevent SQL injection
+		if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(oldName) || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(newName)) {
+			throw new Error("Invalid database name. Database names must start with a letter or underscore and contain only alphanumeric characters and underscores.");
+		}
+
+		// Check for existing connections
+		const connectionInfo = await this.getDatabaseConnections(oldName);
+		if (connectionInfo.count > 0 && !force) {
+			throw new Error(
+				`Cannot rename database: ${connectionInfo.count} active connection(s) exist. Use force option to terminate connections and proceed.`
+			);
+		}
+
+		// Terminate all connections to the database if force is enabled or no connections exist
+		if (connectionInfo.count > 0) {
+			await this.query(
+				`
+				SELECT pg_terminate_backend(pg_stat_activity.pid)
+				FROM pg_stat_activity
+				WHERE pg_stat_activity.datname = $1
+				AND pid <> pg_backend_pid()
+				`,
+				[oldName]
+			);
+			logger.info("[PostgresProvider] Terminated connections before rename", {
+				databaseName: oldName,
+				terminatedCount: connectionInfo.count,
+			});
+		}
+
+		// Then rename the database
+		const sql = `ALTER DATABASE ${quoteIdentifier(oldName)} RENAME TO ${quoteIdentifier(newName)}`;
+		await this.query(sql);
+
+		logger.info("[PostgresProvider] Database renamed", { oldName, newName, force });
+	}
+
+	/**
+	 * Create a new database
+	 * @param databaseName - Name for the new database
+	 * @param owner - Optional owner for the database (defaults to current user)
+	 * @param encoding - Optional encoding (defaults to UTF8)
+	 * @param template - Optional template database (defaults to template1)
+	 */
+	async createDatabase(
+		databaseName: string,
+		options?: {
+			owner?: string;
+			encoding?: string;
+			template?: string;
+		}
+	): Promise<void> {
+		// Validate database name to prevent SQL injection
+		if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(databaseName)) {
+			throw new Error("Invalid database name. Database names must start with a letter or underscore and contain only alphanumeric characters and underscores.");
+		}
+
+		// Prevent creating databases with reserved names
+		const reservedNames = ["postgres", "template0", "template1"];
+		if (reservedNames.includes(databaseName.toLowerCase())) {
+			throw new Error(`Cannot create database with reserved name: ${databaseName}`);
+		}
+
+		// Build the CREATE DATABASE statement
+		let sql = `CREATE DATABASE ${quoteIdentifier(databaseName)}`;
+
+		if (options?.owner) {
+			if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(options.owner)) {
+				throw new Error("Invalid owner name.");
+			}
+			sql += ` OWNER ${quoteIdentifier(options.owner)}`;
+		}
+
+		if (options?.encoding) {
+			// Encoding is a string literal, not an identifier
+			sql += ` ENCODING '${options.encoding.replace(/'/g, "''")}'`;
+		}
+
+		if (options?.template) {
+			if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(options.template)) {
+				throw new Error("Invalid template name.");
+			}
+			sql += ` TEMPLATE ${quoteIdentifier(options.template)}`;
+		}
+
+		await this.query(sql);
+
+		logger.info("[PostgresProvider] Database created", { databaseName, options });
+	}
+
+	/**
+	 * Delete (drop) a database
+	 * Note: This requires that no one is connected to the database being dropped
+	 * @param force - If true, terminate existing connections before deleting
+	 */
+	async deleteDatabase(databaseName: string, force = false): Promise<void> {
+		// Validate database name to prevent SQL injection
+		if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(databaseName)) {
+			throw new Error("Invalid database name. Database names must start with a letter or underscore and contain only alphanumeric characters and underscores.");
+		}
+
+		// Prevent dropping system databases
+		const systemDatabases = ["postgres", "template0", "template1"];
+		if (systemDatabases.includes(databaseName.toLowerCase())) {
+			throw new Error(`Cannot delete system database: ${databaseName}`);
+		}
+
+		// Check for existing connections
+		const connectionInfo = await this.getDatabaseConnections(databaseName);
+		if (connectionInfo.count > 0 && !force) {
+			throw new Error(
+				`Cannot delete database: ${connectionInfo.count} active connection(s) exist. Use force option to terminate connections and proceed.`
+			);
+		}
+
+		// Terminate all connections to the database if force is enabled
+		if (connectionInfo.count > 0) {
+			await this.query(
+				`
+				SELECT pg_terminate_backend(pg_stat_activity.pid)
+				FROM pg_stat_activity
+				WHERE pg_stat_activity.datname = $1
+				AND pid <> pg_backend_pid()
+				`,
+				[databaseName]
+			);
+			logger.info("[PostgresProvider] Terminated connections before delete", {
+				databaseName,
+				terminatedCount: connectionInfo.count,
+			});
+		}
+
+		// Then drop the database
+		const sql = `DROP DATABASE ${quoteIdentifier(databaseName)}`;
+		await this.query(sql);
+
+		logger.info("[PostgresProvider] Database deleted", { databaseName, force });
+	}
 }

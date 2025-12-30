@@ -1,5 +1,5 @@
 import * as React from "react";
-import { Loader2Icon, PlusIcon, SaveIcon, Trash2Icon } from "lucide-react";
+import { Loader2Icon, PlusIcon, SaveIcon, TrashIcon } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "~/components/ui/button";
 import {
@@ -140,7 +140,7 @@ export function RowEditorModal({
 									onClick={() => setShowDeleteConfirm(true)}
 									disabled={isSubmitting}
 								>
-									<Trash2Icon className="size-4" />
+									<TrashIcon />
 									Delete Row
 								</Button>
 							)}

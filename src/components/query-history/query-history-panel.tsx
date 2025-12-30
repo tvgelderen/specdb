@@ -8,7 +8,7 @@ import {
 	ClockIcon,
 	CheckCircle2Icon,
 	XCircleIcon,
-	Trash2Icon,
+	TrashIcon,
 	PlayIcon,
 	CopyIcon,
 	HistoryIcon,
@@ -22,11 +22,7 @@ import { Input } from "~/components/ui/input";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Skeleton } from "~/components/ui/skeleton";
 import { Badge } from "~/components/ui/badge";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "~/components/ui/tooltip";
+import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
 import {
 	AlertDialog,
 	AlertDialogAction,
@@ -119,7 +115,7 @@ export function QueryHistoryPanel({
 			connectionId,
 			search: debouncedSearch || undefined,
 			limit: 100,
-		})
+		}),
 	);
 
 	// Delete mutation
@@ -132,7 +128,7 @@ export function QueryHistoryPanel({
 			onError: (error) => {
 				toast.error(`Failed to delete: ${error.message}`);
 			},
-		})
+		}),
 	);
 
 	// Clear all history mutation
@@ -145,7 +141,7 @@ export function QueryHistoryPanel({
 			onError: (error) => {
 				toast.error(`Failed to clear history: ${error.message}`);
 			},
-		})
+		}),
 	);
 
 	// Handle refresh
@@ -169,7 +165,7 @@ export function QueryHistoryPanel({
 			onReplayQuery?.(queryText);
 			toast.success("Query loaded in editor");
 		},
-		[onReplayQuery]
+		[onReplayQuery],
 	);
 
 	// Handle toggle expand
@@ -181,11 +177,7 @@ export function QueryHistoryPanel({
 	if (isCollapsed) {
 		return (
 			<aside
-				className={cn(
-					"flex flex-col border-l bg-sidebar text-sidebar-foreground",
-					"w-10 shrink-0",
-					className
-				)}
+				className={cn("flex flex-col border-l bg-sidebar text-sidebar-foreground", "w-10 shrink-0", className)}
 			>
 				<div className="flex flex-col items-center py-2">
 					<Tooltip>
@@ -215,7 +207,7 @@ export function QueryHistoryPanel({
 			className={cn(
 				"flex flex-col border-l bg-sidebar text-sidebar-foreground h-full",
 				"w-80 shrink-0",
-				className
+				className,
 			)}
 		>
 			{/* Header */}
@@ -235,12 +227,7 @@ export function QueryHistoryPanel({
 								className="size-7"
 								aria-label="Refresh history"
 							>
-								<RefreshCwIcon
-									className={cn(
-										"size-4",
-										isLoading && "animate-spin"
-									)}
-								/>
+								<RefreshCwIcon className={cn("size-4", isLoading && "animate-spin")} />
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent>Refresh</TooltipContent>
@@ -258,7 +245,7 @@ export function QueryHistoryPanel({
 											className="size-7 text-destructive hover:text-destructive"
 											aria-label="Clear all history"
 										>
-											<Trash2Icon className="size-4" />
+											<TrashIcon />
 										</Button>
 									</AlertDialogTrigger>
 								</TooltipTrigger>
@@ -268,8 +255,8 @@ export function QueryHistoryPanel({
 								<AlertDialogHeader>
 									<AlertDialogTitle>Clear Query History?</AlertDialogTitle>
 									<AlertDialogDescription>
-										This will permanently delete all query history for this
-										connection. This action cannot be undone.
+										This will permanently delete all query history for this connection. This action
+										cannot be undone.
 									</AlertDialogDescription>
 								</AlertDialogHeader>
 								<AlertDialogFooter>
@@ -341,9 +328,7 @@ export function QueryHistoryPanel({
 							<HistoryIcon className="size-10 mb-3 opacity-50" />
 							<p className="text-sm font-medium">No queries yet</p>
 							<p className="text-xs text-center mt-1">
-								{searchQuery
-									? "No queries match your search"
-									: "Executed queries will appear here"}
+								{searchQuery ? "No queries match your search" : "Executed queries will appear here"}
 							</p>
 						</div>
 					)}
@@ -358,7 +343,7 @@ export function QueryHistoryPanel({
 									key={entry.id}
 									className={cn(
 										"p-2 rounded-md border bg-card transition-colors",
-										"hover:bg-accent/50 cursor-pointer"
+										"hover:bg-accent/50 cursor-pointer",
 									)}
 									onClick={() => handleToggleExpand(entry.id)}
 								>
@@ -376,12 +361,10 @@ export function QueryHistoryPanel({
 											<p
 												className={cn(
 													"text-xs font-mono break-all",
-													isExpanded ? "whitespace-pre-wrap" : "line-clamp-2"
+													isExpanded ? "whitespace-pre-wrap" : "line-clamp-2",
 												)}
 											>
-												{isExpanded
-													? entry.queryText
-													: truncateQuery(entry.queryText)}
+												{isExpanded ? entry.queryText : truncateQuery(entry.queryText)}
 											</p>
 
 											{/* Metadata row */}
@@ -456,7 +439,7 @@ export function QueryHistoryPanel({
 												}}
 												className="h-7 text-xs text-destructive hover:text-destructive ml-auto"
 											>
-												<Trash2Icon className="size-3 mr-1" />
+												<TrashIcon className="size-3" />
 												Delete
 											</Button>
 										</div>

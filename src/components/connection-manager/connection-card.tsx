@@ -1,16 +1,4 @@
-import * as React from "react";
-import {
-	CheckCircle2,
-	Circle,
-	Database,
-	Edit2,
-	Loader2,
-	MoreVertical,
-	Play,
-	Trash2,
-	Unplug,
-	Zap,
-} from "lucide-react";
+import { CheckCircle2, Circle, Database, Edit2, Loader2, MoreVertical, Play, Trash, Unplug, Zap } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import {
@@ -73,9 +61,7 @@ export function ConnectionCard({
 					disabled={isConnecting}
 					className={cn(
 						"flex-shrink-0 rounded-full p-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-						isActive
-							? "text-success hover:text-success/80"
-							: "text-muted-foreground hover:text-foreground",
+						isActive ? "text-success hover:text-success/80" : "text-muted-foreground hover:text-foreground",
 					)}
 				>
 					{isConnecting ? (
@@ -110,15 +96,8 @@ export function ConnectionCard({
 						{connection.host}:{connection.port}/{connection.database}
 					</p>
 					{testResult && (
-						<p
-							className={cn(
-								"text-xs mt-1",
-								testResult.success ? "text-success" : "text-destructive",
-							)}
-						>
-							{testResult.success
-								? `Connected (${testResult.latencyMs}ms)`
-								: "Connection failed"}
+						<p className={cn("text-xs mt-1", testResult.success ? "text-success" : "text-destructive")}>
+							{testResult.success ? `Connected (${testResult.latencyMs}ms)` : "Connection failed"}
 						</p>
 					)}
 				</div>
@@ -129,12 +108,7 @@ export function ConnectionCard({
 					{!isActive && (
 						<Tooltip>
 							<TooltipTrigger asChild>
-								<Button
-									variant="ghost"
-									size="icon"
-									onClick={onConnect}
-									disabled={isConnecting}
-								>
+								<Button variant="ghost" size="icon" onClick={onConnect} disabled={isConnecting}>
 									{isConnecting ? (
 										<Loader2 className="size-4 animate-spin" />
 									) : (
@@ -149,12 +123,7 @@ export function ConnectionCard({
 					{isActive && (
 						<Tooltip>
 							<TooltipTrigger asChild>
-								<Button
-									variant="ghost"
-									size="icon"
-									onClick={onDisconnect}
-									disabled={isConnecting}
-								>
+								<Button variant="ghost" size="icon" onClick={onDisconnect} disabled={isConnecting}>
 									<Unplug className="size-4" />
 								</Button>
 							</TooltipTrigger>
@@ -166,11 +135,7 @@ export function ConnectionCard({
 					<Tooltip>
 						<TooltipTrigger asChild>
 							<Button variant="ghost" size="icon" onClick={onTest} disabled={isTesting}>
-								{isTesting ? (
-									<Loader2 className="size-4 animate-spin" />
-								) : (
-									<Zap className="size-4" />
-								)}
+								{isTesting ? <Loader2 className="size-4 animate-spin" /> : <Zap className="size-4" />}
 							</Button>
 						</TooltipTrigger>
 						<TooltipContent>Test Connection</TooltipContent>
@@ -193,11 +158,8 @@ export function ConnectionCard({
 								Test Connection
 							</DropdownMenuItem>
 							<DropdownMenuSeparator />
-							<DropdownMenuItem
-								onClick={onDelete}
-								className="text-destructive focus:text-destructive"
-							>
-								<Trash2 className="size-4 mr-2" />
+							<DropdownMenuItem onClick={onDelete} className="text-destructive focus:text-destructive">
+								<Trash />
 								Delete
 							</DropdownMenuItem>
 						</DropdownMenuContent>

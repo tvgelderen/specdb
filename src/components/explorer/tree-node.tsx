@@ -50,6 +50,8 @@ export interface TreeNodeProps {
 	onSelect?: () => void;
 	/** Child nodes (rendered when expanded) */
 	children?: React.ReactNode;
+	/** Optional actions element to render (shown on hover) */
+	actions?: React.ReactNode;
 }
 
 /**
@@ -78,9 +80,11 @@ export function TreeNode({
 	onToggle,
 	onSelect,
 	children,
+	actions,
 }: TreeNodeProps) {
 	const IconComponent = getNodeIcon(treeMeta.icon);
 	const canExpand = treeMeta.isExpandable;
+	const [isHovered, setIsHovered] = React.useState(false);
 
 	const handleToggle = React.useCallback(
 		(e: React.MouseEvent) => {
@@ -131,7 +135,7 @@ export function TreeNode({
 				aria-expanded={canExpand ? isExpanded : undefined}
 				aria-selected={isSelected}
 				className={cn(
-					"flex items-center gap-1 h-8 pr-2 cursor-pointer select-none",
+					"group flex items-center gap-1 h-8 pr-2 cursor-pointer select-none",
 					"rounded-md transition-colors duration-150",
 					"hover:bg-accent focus-visible:bg-accent",
 					"focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
@@ -142,6 +146,8 @@ export function TreeNode({
 				onClick={handleSelect}
 				onDoubleClick={handleToggle}
 				onKeyDown={handleKeyDown}
+				onMouseEnter={() => setIsHovered(true)}
+				onMouseLeave={() => setIsHovered(false)}
 			>
 				{/* Expand/collapse button */}
 				<button
@@ -172,13 +178,24 @@ export function TreeNode({
 				)}
 
 				{/* Label */}
-				<span className="truncate text-sm">{label}</span>
+				<span className="truncate text-sm flex-1">{label}</span>
 
 				{/* Loading indicator */}
 				{isLoading && (
-					<span className="ml-auto shrink-0">
+					<span className="shrink-0">
 						<span className="size-3 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent inline-block" />
 					</span>
+				)}
+
+				{/* Actions (context menu) - shown on hover */}
+				{actions && (
+					<div className="shrink-0">
+						{React.isValidElement(actions)
+							? React.cloneElement(actions as React.ReactElement<{ isVisible?: boolean }>, {
+									isVisible: isHovered,
+								})
+							: actions}
+					</div>
 				)}
 			</div>
 

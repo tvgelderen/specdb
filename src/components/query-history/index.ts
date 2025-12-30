@@ -1,5 +1,1 @@
-export {
-	QueryHistoryPanel,
-	useQueryHistoryPanel,
-	type QueryHistoryPanelProps,
-} from "./query-history-panel";
+export { QueryHistoryPanel, useQueryHistoryPanel, type QueryHistoryPanelProps } from "./query-history-panel";

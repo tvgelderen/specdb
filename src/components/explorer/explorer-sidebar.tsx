@@ -1,5 +1,5 @@
 import * as React from "react";
-import { RefreshCwIcon, XIcon } from "lucide-react";
+import { PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { useLocalStorage, useSidebarResize, SIDEBAR_WIDTH } from "~/lib/hooks";
 import type { UseSidebarResizeReturn } from "~/lib/hooks";
@@ -36,6 +36,10 @@ export interface ExplorerSidebarProps {
 	onCloseMobile?: () => void;
 	/** Optional callback when refresh is clicked */
 	onRefresh?: () => void;
+	/** Optional callback when create database is clicked */
+	onCreateDatabase?: () => void;
+	/** Whether there is an active connection */
+	hasActiveConnection?: boolean;
 	/** Sidebar width in pixels (desktop only) */
 	width?: number;
 	/** Whether the sidebar is currently being resized */
@@ -58,6 +62,8 @@ export function ExplorerSidebar({
 	onToggleCollapse,
 	onCloseMobile,
 	onRefresh,
+	onCreateDatabase,
+	hasActiveConnection = false,
 	width,
 	isResizing = false,
 	resizeHandleProps,
@@ -107,6 +113,22 @@ export function ExplorerSidebar({
 						<SidebarConnectionSelector />
 					</div>
 					<div className="flex items-center gap-0.5 shrink-0">
+						{onCreateDatabase && hasActiveConnection && (
+							<Tooltip>
+								<TooltipTrigger asChild>
+									<Button
+										variant="ghost"
+										size="icon"
+										onClick={onCreateDatabase}
+										className="size-7"
+										aria-label="Create database"
+									>
+										<PlusIcon className="size-4" />
+									</Button>
+								</TooltipTrigger>
+								<TooltipContent>Create Database</TooltipContent>
+							</Tooltip>
+						)}
 						{onRefresh && (
 							<Tooltip>
 								<TooltipTrigger asChild>

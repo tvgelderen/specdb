@@ -59,6 +59,8 @@ export interface TreeNodeMeta {
 export type ExplorerPermission =
 	| "explorer.view"
 	| "explorer.databases.list"
+	| "explorer.databases.write"
+	| "explorer.databases.delete"
 	| "explorer.schemas.list"
 	| "explorer.tables.list"
 	| "explorer.tables.read"
