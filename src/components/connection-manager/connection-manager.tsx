@@ -92,9 +92,10 @@ export function ConnectionManager({ className }: ConnectionManagerProps) {
 		return connections.filter(
 			(conn) =>
 				conn.name.toLowerCase().includes(query) ||
-				conn.host.toLowerCase().includes(query) ||
-				conn.database.toLowerCase().includes(query) ||
-				conn.providerType.toLowerCase().includes(query),
+				(conn.host?.toLowerCase().includes(query) ?? false) ||
+				(conn.database?.toLowerCase().includes(query) ?? false) ||
+				conn.providerType.toLowerCase().includes(query) ||
+				(conn.sqliteConfig?.filepath?.toLowerCase().includes(query) ?? false),
 		);
 	}, [connections, searchQuery]);
 
@@ -158,6 +159,7 @@ export function ConnectionManager({ className }: ConnectionManagerProps) {
 			password: fields.password,
 			sslConfig: fields.sslConfig,
 			connectionTimeoutMs: fields.connectionTimeoutMs,
+			sqliteConfig: fields.sqliteConfig,
 		});
 	};
 
@@ -174,6 +176,7 @@ export function ConnectionManager({ className }: ConnectionManagerProps) {
 			maxPoolSize: data.maxPoolSize,
 			idleTimeoutMs: data.idleTimeoutMs,
 			connectionTimeoutMs: data.connectionTimeoutMs,
+			sqliteConfig: data.sqliteConfig,
 			color: data.color,
 			notes: data.notes,
 		});
@@ -194,6 +197,7 @@ export function ConnectionManager({ className }: ConnectionManagerProps) {
 			maxPoolSize: data.maxPoolSize,
 			idleTimeoutMs: data.idleTimeoutMs,
 			connectionTimeoutMs: data.connectionTimeoutMs,
+			sqliteConfig: data.sqliteConfig,
 			color: data.color,
 			notes: data.notes,
 		});
@@ -340,15 +344,22 @@ export function ConnectionManager({ className }: ConnectionManagerProps) {
 									| "sqlite"
 									| "mongodb"
 									| "redis",
-								host: editingConnection.host,
-								port: editingConnection.port,
-								database: editingConnection.database,
-								username: editingConnection.username,
+								host: editingConnection.host ?? "",
+								port: editingConnection.port ?? 0,
+								database: editingConnection.database ?? "",
+								username: editingConnection.username ?? "",
 								password: "", // Don't prefill password
 								sslConfig: editingConnection.sslConfig || { enabled: false },
 								maxPoolSize: editingConnection.maxPoolSize || 10,
 								idleTimeoutMs: editingConnection.idleTimeoutMs || 30000,
 								connectionTimeoutMs: editingConnection.connectionTimeoutMs || 5000,
+								sqliteConfig: editingConnection.sqliteConfig || {
+									filepath: "",
+									readonly: false,
+									fileMustExist: true,
+									enableWAL: true,
+									enableForeignKeys: true,
+								},
 								color: editingConnection.color,
 								notes: editingConnection.notes,
 							}}

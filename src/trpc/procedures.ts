@@ -4,7 +4,8 @@ import { rateLimit } from "~/trpc/middleware/rate-limit";
 
 const baseProcedure = procedure.use(logging).use(
 	rateLimit({
-		limit: 100,
+		// Very generous rate limits for local-only application
+		limit: 10000,
 		windowInSeconds: 60,
 	}),
 );

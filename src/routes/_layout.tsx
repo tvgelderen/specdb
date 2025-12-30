@@ -1,5 +1,5 @@
 import * as React from "react";
-import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Outlet, useNavigate } from "@tanstack/react-router";
 import { useQueryClient, useQuery, useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Header } from "~/components/header";
@@ -16,6 +16,7 @@ export const Route = createFileRoute("/_layout")({
 function RouteComponent() {
 	const queryClient = useQueryClient();
 	const trpc = useTRPC();
+	const navigate = useNavigate();
 	const { setSelectedTable } = useTableSelection();
 	const {
 		isCollapsed,
@@ -39,6 +40,10 @@ function RouteComponent() {
 		trpc.explorer.hasActiveConnection.queryOptions({})
 	);
 	const hasActiveConnection = activeConnectionQuery.data?.hasConnection ?? false;
+	const activeProviderType = activeConnectionQuery.data?.providerType ?? null;
+
+	// SQLite doesn't support creating databases through the UI
+	const canCreateDatabase = hasActiveConnection && activeProviderType !== "sqlite";
 
 	// Create database mutation
 	const createDatabaseMutation = useMutation(
@@ -88,6 +93,7 @@ function RouteComponent() {
 			closeMobile();
 
 			// If a table, view, or materialized view is selected, update the table selection
+			// and navigate to the index page to show the table view
 			if (
 				(node.type === "table" || node.type === "view" || node.type === "materialized_view") &&
 				node.schema &&
@@ -99,9 +105,11 @@ function RouteComponent() {
 					schema: node.schema,
 					table: node.table,
 				});
+				// Navigate to the index page to show the table view
+				navigate({ to: "/" });
 			}
 		},
-		[setSelectedNodeId, closeMobile, setSelectedTable]
+		[setSelectedNodeId, closeMobile, setSelectedTable, navigate]
 	);
 
 	// Handle refresh
@@ -161,8 +169,9 @@ function RouteComponent() {
 					onToggleCollapse={toggleCollapse}
 					onCloseMobile={closeMobile}
 					onRefresh={handleRefresh}
-					onCreateDatabase={() => setCreateDialogOpen(true)}
+					onCreateDatabase={canCreateDatabase ? () => setCreateDialogOpen(true) : undefined}
 					hasActiveConnection={hasActiveConnection}
+					providerType={activeProviderType}
 					width={isMobileOpen ? undefined : width}
 					isResizing={isResizing}
 					resizeHandleProps={isMobileOpen ? undefined : resizeHandleProps}

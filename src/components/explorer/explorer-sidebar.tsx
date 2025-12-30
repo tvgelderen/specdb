@@ -1,11 +1,12 @@
 import * as React from "react";
-import { PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import { DatabaseIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { useLocalStorage, useSidebarResize, SIDEBAR_WIDTH } from "~/lib/hooks";
 import type { UseSidebarResizeReturn } from "~/lib/hooks";
 import { Button } from "~/components/ui/button";
 import { ScrollArea } from "~/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
 import { SidebarConnectionSelector } from "~/components/sidebar-connection-selector";
 import { ExplorerTree } from "./explorer-tree";
 
@@ -40,6 +41,8 @@ export interface ExplorerSidebarProps {
 	onCreateDatabase?: () => void;
 	/** Whether there is an active connection */
 	hasActiveConnection?: boolean;
+	/** The provider type of the active connection (e.g., 'sqlite', 'postgres') */
+	providerType?: string | null;
 	/** Sidebar width in pixels (desktop only) */
 	width?: number;
 	/** Whether the sidebar is currently being resized */
@@ -64,6 +67,7 @@ export function ExplorerSidebar({
 	onRefresh,
 	onCreateDatabase,
 	hasActiveConnection = false,
+	providerType,
 	width,
 	isResizing = false,
 	resizeHandleProps,
@@ -169,11 +173,26 @@ export function ExplorerSidebar({
 
 			{/* Tree container */}
 			<ScrollArea className="flex-1 min-h-0" size="sm">
-				<ExplorerTree
-					connectionId={connectionId}
-					onNodeSelect={onNodeSelect}
-					selectedNodeId={selectedNodeId}
-				/>
+				{hasActiveConnection ? (
+					<ExplorerTree
+						connectionId={connectionId}
+						onNodeSelect={onNodeSelect}
+						selectedNodeId={selectedNodeId}
+						providerType={providerType}
+					/>
+				) : (
+					<Empty className="py-8 px-4 border-0">
+						<EmptyMedia variant="icon">
+							<DatabaseIcon />
+						</EmptyMedia>
+						<EmptyHeader>
+							<EmptyTitle>No Connection</EmptyTitle>
+							<EmptyDescription>
+								Select a connection from the dropdown above to explore your databases.
+							</EmptyDescription>
+						</EmptyHeader>
+					</Empty>
+				)}
 			</ScrollArea>
 
 			{/* Footer with connection info (optional) */}

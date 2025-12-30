@@ -32,14 +32,8 @@ const providerShortLabels: Record<string, string> = {
 };
 
 export function ConnectionStatus() {
-	const {
-		connections,
-		activeConnection,
-		isLoading,
-		setActiveConnection,
-		clearActiveConnection,
-		isOperationPending,
-	} = useConnection();
+	const { connections, activeConnection, isLoading, setActiveConnection, clearActiveConnection, isOperationPending } =
+		useConnection();
 
 	const [isOpen, setIsOpen] = React.useState(false);
 	const [connectingId, setConnectingId] = React.useState<number | null>(null);
@@ -92,10 +86,7 @@ export function ConnectionStatus() {
 				<Button
 					variant="ghost"
 					size="sm"
-					className={cn(
-						"h-8 gap-2 px-2.5 max-w-[180px] hover:bg-accent/80",
-						activeConnection && "pr-2"
-					)}
+					className={cn("h-8 gap-2 px-2.5 max-w-[180px] hover:bg-accent/80", activeConnection && "pr-2")}
 				>
 					{activeConnection ? (
 						<>
@@ -122,12 +113,10 @@ export function ConnectionStatus() {
 					) : (
 						<>
 							<Circle className="size-2 text-muted-foreground fill-muted-foreground/30" />
-							<span className="hidden sm:inline text-xs text-muted-foreground">
-								Not connected
-							</span>
+							<span className="hidden sm:inline text-xs text-muted-foreground">Not connected</span>
 						</>
 					)}
-					<ChevronDown className="size-3 text-muted-foreground flex-shrink-0 ml-0.5" />
+					<ChevronDown className="size-3 text-muted-foreground shrink-0 ml-0.5" />
 				</Button>
 			</DropdownMenuTrigger>
 			<DropdownMenuContent align="end" className="w-72" sideOffset={8}>
@@ -136,7 +125,7 @@ export function ConnectionStatus() {
 				</DropdownMenuLabel>
 				<DropdownMenuSeparator />
 
-				<div className="max-h-[280px] overflow-y-auto">
+				<div className="max-h-70 overflow-y-auto">
 					{connections.map((connection) => {
 						const isActive = activeConnection?.id === connection.id;
 						const isConnecting = connectingId === connection.id;
@@ -148,18 +137,15 @@ export function ConnectionStatus() {
 								disabled={isConnecting}
 								className={cn(
 									"flex items-center gap-3 cursor-pointer py-2.5 px-3",
-									isActive && "bg-accent"
+									isActive && "bg-accent",
 								)}
 							>
-								<div className="relative flex-shrink-0">
+								<div className="relative shrink-0">
 									<div
 										className="size-8 rounded-md flex items-center justify-center"
 										style={{ backgroundColor: `${connection.color || "#6B7280"}15` }}
 									>
-										<Database
-											className="size-4"
-											style={{ color: connection.color || "#6B7280" }}
-										/>
+										<Database className="size-4" style={{ color: connection.color || "#6B7280" }} />
 									</div>
 									{isActive && (
 										<span
@@ -176,12 +162,12 @@ export function ConnectionStatus() {
 									</p>
 								</div>
 								{isConnecting && (
-									<Loader2 className="size-4 animate-spin flex-shrink-0 text-muted-foreground" />
+									<Loader2 className="size-4 animate-spin shrink-0 text-muted-foreground" />
 								)}
 								{isActive && !isConnecting && (
 									<Badge
 										variant="secondary"
-										className="text-[10px] px-1.5 py-0 h-4 font-medium flex-shrink-0 bg-success/10 text-success border-0"
+										className="text-[10px] px-1.5 py-0 h-4 font-medium shrink-0 bg-success/10 text-success border-0"
 									>
 										Active
 									</Badge>
@@ -197,10 +183,10 @@ export function ConnectionStatus() {
 						<DropdownMenuItem
 							onClick={handleDisconnect}
 							disabled={isOperationPending}
-							className="text-destructive focus:text-destructive focus:bg-destructive/10 py-2"
+							className="text-destructive focus:text-destructive focus:bg-destructive/10"
 						>
-							<Unplug className="size-4 mr-2" />
-							<span className="text-sm">Disconnect</span>
+							<Unplug />
+							Disconnect
 						</DropdownMenuItem>
 					</>
 				)}

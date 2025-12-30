@@ -5,20 +5,34 @@ import { useTRPC } from "~/trpc/react";
 import { toast } from "sonner";
 
 /**
+ * SQLite-specific configuration
+ */
+export interface SqliteConfig {
+	filepath: string;
+	readonly: boolean;
+	fileMustExist: boolean;
+	enableWAL: boolean;
+	enableForeignKeys: boolean;
+}
+
+/**
  * Connection type from the API (safe version without encrypted password)
  */
 export interface Connection {
 	id: number;
 	name: string;
 	providerType: string;
-	host: string;
-	port: number;
-	database: string;
-	username: string;
+	// Common connection fields (can be null for SQLite connections)
+	host: string | null;
+	port: number | null;
+	database: string | null;
+	username: string | null;
 	sslConfig: { enabled: boolean; rejectUnauthorized?: boolean } | null;
 	maxPoolSize: number | null;
 	idleTimeoutMs: number | null;
 	connectionTimeoutMs: number | null;
+	// SQLite-specific configuration
+	sqliteConfig: SqliteConfig | null;
 	isActive: boolean;
 	color: string | null;
 	notes: string | null;
@@ -89,6 +103,7 @@ export function ConnectionProvider({ children }: ConnectionProviderProps) {
 				queryClient.invalidateQueries({ queryKey: trpc.explorer.listDatabases.queryKey() });
 				queryClient.invalidateQueries({ queryKey: trpc.explorer.listSchemas.queryKey() });
 				queryClient.invalidateQueries({ queryKey: trpc.explorer.listTables.queryKey() });
+				queryClient.invalidateQueries({ queryKey: trpc.explorer.hasActiveConnection.queryKey() });
 			},
 			onError: (error) => {
 				toast.error(`Failed to connect: ${error.message}`);
@@ -107,6 +122,7 @@ export function ConnectionProvider({ children }: ConnectionProviderProps) {
 				queryClient.invalidateQueries({ queryKey: trpc.explorer.listDatabases.queryKey() });
 				queryClient.invalidateQueries({ queryKey: trpc.explorer.listSchemas.queryKey() });
 				queryClient.invalidateQueries({ queryKey: trpc.explorer.listTables.queryKey() });
+				queryClient.invalidateQueries({ queryKey: trpc.explorer.hasActiveConnection.queryKey() });
 			},
 			onError: (error) => {
 				toast.error(`Failed to disconnect: ${error.message}`);

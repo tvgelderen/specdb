@@ -7,6 +7,7 @@ import logger from "~/lib/logging";
 
 // Import registrations to ensure providers are registered
 import "~/providers/postgres/registration";
+import "~/providers/sqlite/registration";
 
 /**
  * Schema for provider type

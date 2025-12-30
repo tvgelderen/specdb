@@ -71,6 +71,8 @@ export interface ExplorerTreeProps {
 	}) => void;
 	/** Currently selected node ID */
 	selectedNodeId?: string;
+	/** The provider type of the active connection (e.g., 'sqlite', 'postgres') */
+	providerType?: string | null;
 }
 
 /**
@@ -81,6 +83,7 @@ export function ExplorerTree({
 	connectionId,
 	onNodeSelect,
 	selectedNodeId,
+	providerType,
 }: ExplorerTreeProps) {
 	const trpc = useTRPC();
 
@@ -180,6 +183,7 @@ export function ExplorerTree({
 					expandedNodes={expandedNodes}
 					toggleNode={toggleNode}
 					prefetchTablesForSchemas={prefetchTablesForSchemas}
+					providerType={providerType}
 				/>
 			))}
 
@@ -219,6 +223,8 @@ interface DatabaseNodeProps {
 	toggleNode: (nodeId: string) => void;
 	/** Callback to prefetch tables for all schemas when schemas load */
 	prefetchTablesForSchemas: (schemas: ExplorerSchemaInfo[]) => void;
+	/** The provider type of the active connection (e.g., 'sqlite', 'postgres') */
+	providerType?: string | null;
 }
 
 function DatabaseNode({
@@ -233,6 +239,7 @@ function DatabaseNode({
 	expandedNodes,
 	toggleNode,
 	prefetchTablesForSchemas,
+	providerType,
 }: DatabaseNodeProps) {
 	const trpc = useTRPC();
 	const queryClient = useQueryClient();
@@ -346,11 +353,14 @@ function DatabaseNode({
 				onToggle={onToggle}
 				onSelect={onSelect}
 				actions={
-					<DatabaseContextMenu
-						databaseName={database.name}
-						onRename={() => setRenameDialogOpen(true)}
-						onDelete={() => setDeleteDialogOpen(true)}
-					/>
+					// SQLite doesn't support rename/delete database operations
+					providerType !== "sqlite" ? (
+						<DatabaseContextMenu
+							databaseName={database.name}
+							onRename={() => setRenameDialogOpen(true)}
+							onDelete={() => setDeleteDialogOpen(true)}
+						/>
+					) : undefined
 				}
 			>
 				{/* Loading state */}

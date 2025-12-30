@@ -124,7 +124,7 @@ export function ConnectionCard({
 						<Tooltip>
 							<TooltipTrigger asChild>
 								<Button variant="ghost" size="icon" onClick={onDisconnect} disabled={isConnecting}>
-									<Unplug className="size-4" />
+									<Unplug />
 								</Button>
 							</TooltipTrigger>
 							<TooltipContent>Disconnect</TooltipContent>

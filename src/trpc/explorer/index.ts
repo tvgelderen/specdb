@@ -7,6 +7,7 @@ import { logging } from "~/trpc/middleware/logging";
 import { rateLimit } from "~/trpc/middleware/rate-limit";
 import { requirePermission, withUserContext } from "~/trpc/middleware/permission";
 import { PostgresProvider } from "~/providers/postgres/provider";
+import { SqliteProvider } from "~/providers/sqlite/provider";
 import { db } from "~/db";
 import { connections } from "~/db/schema";
 import { decrypt } from "~/lib/encryption";
@@ -20,6 +21,19 @@ import {
 	type PaginatedExplorerResponse,
 	type TreeNodeMeta,
 } from "./types";
+
+/**
+ * Union type for supported database providers
+ */
+type DatabaseProvider = PostgresProvider | SqliteProvider;
+
+/**
+ * Provider info including the provider instance and type
+ */
+interface ProviderInfo {
+	provider: DatabaseProvider;
+	type: "postgres" | "sqlite";
+}
 
 // Re-export types for consumers
 export * from "./types";
@@ -81,12 +95,13 @@ function createTableTreeMeta(
 }
 
 /**
- * Get PostgresProvider from the active connection stored in the database
- * Falls back to environment variables if no active connection is found
+ * Get database provider from the active connection stored in the database
+ * Supports both PostgreSQL and SQLite connections
+ * Falls back to environment variables for PostgreSQL if no active connection is found
  * @param connectionId - Optional connection ID (reserved for future multi-connection support)
  * @param database - Optional database name to override the connection's default database
  */
-async function getProvider(connectionId?: string, database?: string): Promise<PostgresProvider> {
+async function getProviderInfo(connectionId?: string, database?: string): Promise<ProviderInfo> {
 	// First, try to get the active connection from the database
 	const activeConnection = db
 		.select()
@@ -95,17 +110,42 @@ async function getProvider(connectionId?: string, database?: string): Promise<Po
 		.get();
 
 	if (activeConnection) {
-		// Decrypt the password and build the config from the active connection
-		const decryptedPassword = decrypt(activeConnection.encryptedPassword);
+		// Handle SQLite connections
+		if (activeConnection.providerType === "sqlite") {
+			const sqliteConfig = activeConnection.sqliteConfig ? JSON.parse(activeConnection.sqliteConfig) : null;
+
+			if (!sqliteConfig?.filepath) {
+				throw new Error("SQLite connection is missing file path configuration");
+			}
+
+			logger.debug("[Explorer] Using SQLite connection from database", {
+				connectionId: activeConnection.id,
+				name: activeConnection.name,
+				filepath: sqliteConfig.filepath,
+			});
+
+			const provider = new SqliteProvider({
+				filepath: sqliteConfig.filepath,
+				readonly: sqliteConfig.readonly ?? false,
+				fileMustExist: sqliteConfig.fileMustExist ?? true,
+				enableWAL: sqliteConfig.enableWAL ?? true,
+				enableForeignKeys: sqliteConfig.enableForeignKeys ?? true,
+			});
+			await provider.connect();
+			return { provider, type: "sqlite" };
+		}
+
+		// Handle PostgreSQL connections
+		const decryptedPassword = decrypt(activeConnection.encryptedPassword ?? "");
 		const sslConfig = activeConnection.sslConfig ? JSON.parse(activeConnection.sslConfig) : null;
 
 		const config = {
-			host: activeConnection.host,
-			port: activeConnection.port,
-			user: activeConnection.username,
+			host: activeConnection.host ?? "localhost",
+			port: activeConnection.port ?? 5432,
+			user: activeConnection.username ?? "",
 			password: decryptedPassword,
 			// Use the provided database if specified, otherwise use the connection's default
-			database: database ?? activeConnection.database,
+			database: database ?? activeConnection.database ?? "",
 			max: activeConnection.maxPoolSize ?? 10,
 			idleTimeoutMillis: activeConnection.idleTimeoutMs ?? 30000,
 			connectionTimeoutMillis: activeConnection.connectionTimeoutMs ?? 5000,
@@ -116,7 +156,7 @@ async function getProvider(connectionId?: string, database?: string): Promise<Po
 				: undefined,
 		};
 
-		logger.debug("[Explorer] Using active connection from database", {
+		logger.debug("[Explorer] Using PostgreSQL connection from database", {
 			connectionId: activeConnection.id,
 			name: activeConnection.name,
 			database: config.database,
@@ -124,10 +164,10 @@ async function getProvider(connectionId?: string, database?: string): Promise<Po
 
 		const provider = new PostgresProvider(config);
 		await provider.connect();
-		return provider;
+		return { provider, type: "postgres" };
 	}
 
-	// Fallback to environment variables if no active connection
+	// Fallback to environment variables if no active connection (PostgreSQL only)
 	logger.debug("[Explorer] No active connection found, falling back to environment variables");
 	const config = {
 		host: process.env.POSTGRES_HOST ?? "localhost",
@@ -140,7 +180,7 @@ async function getProvider(connectionId?: string, database?: string): Promise<Po
 
 	const provider = new PostgresProvider(config);
 	await provider.connect();
-	return provider;
+	return { provider, type: "postgres" };
 }
 
 /**
@@ -251,7 +291,7 @@ export const explorerRouter = router({
 	 */
 	listDatabases: publicProcedure
 		.use(logging)
-		.use(rateLimit({ limit: 100, windowInSeconds: 60 }))
+		.use(rateLimit({ limit: 10000, windowInSeconds: 60 }))
 		.use(withUserContext)
 		.use(requirePermission("explorer.databases.list"))
 		.input(listDatabasesInput)
@@ -262,25 +302,43 @@ export const explorerRouter = router({
 				pagination: input.pagination,
 			});
 
-			let provider: PostgresProvider | null = null;
+			let providerInfo: ProviderInfo | null = null;
 			try {
-				provider = await getProvider(input.connectionId);
+				providerInfo = await getProviderInfo(input.connectionId);
 
 				const pagination = {
 					limit: input.pagination?.limit ?? EXPLORER_DEFAULT_LIMIT,
 					offset: input.pagination?.offset ?? 0,
 				};
 
-				const result = await provider.listDatabasesPaginated(pagination);
+				let items: ExplorerDatabaseInfo[];
+				let result: { total: number; offset: number; limit: number; hasMore: boolean };
 
-				const items: ExplorerDatabaseInfo[] = result.items.map((db) => ({
-					name: db.name,
-					owner: db.owner,
-					encoding: db.encoding,
-					size: db.size,
-					tablespace: db.tablespace,
-					treeMeta: createDatabaseTreeMeta(db.name),
-				}));
+				if (providerInfo.type === "sqlite") {
+					const sqliteProvider = providerInfo.provider as SqliteProvider;
+					const sqliteResult = await sqliteProvider.listDatabasesPaginated(pagination);
+					items = sqliteResult.items.map((db) => ({
+						name: db.name,
+						owner: "", // SQLite doesn't have owners
+						encoding: "UTF-8", // SQLite uses UTF-8
+						size: db.size,
+						tablespace: "", // SQLite doesn't have tablespaces
+						treeMeta: createDatabaseTreeMeta(db.name),
+					}));
+					result = sqliteResult;
+				} else {
+					const pgProvider = providerInfo.provider as PostgresProvider;
+					const pgResult = await pgProvider.listDatabasesPaginated(pagination);
+					items = pgResult.items.map((db) => ({
+						name: db.name,
+						owner: db.owner,
+						encoding: db.encoding,
+						size: db.size,
+						tablespace: db.tablespace,
+						treeMeta: createDatabaseTreeMeta(db.name),
+					}));
+					result = pgResult;
+				}
 
 				logger.info("[Explorer] listDatabases completed", {
 					count: items.length,
@@ -302,12 +360,12 @@ export const explorerRouter = router({
 				logger.error("[Explorer] listDatabases failed", error);
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
-					message: "Failed to list databases",
+					message: error instanceof Error ? error.message : "Failed to list databases",
 					cause: error,
 				});
 			} finally {
-				if (provider) {
-					await provider.disconnect().catch((err) => {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
 						logger.warn("[Explorer] Failed to disconnect provider", err);
 					});
 				}
@@ -319,7 +377,7 @@ export const explorerRouter = router({
 	 */
 	listSchemas: publicProcedure
 		.use(logging)
-		.use(rateLimit({ limit: 100, windowInSeconds: 60 }))
+		.use(rateLimit({ limit: 10000, windowInSeconds: 60 }))
 		.use(withUserContext)
 		.use(requirePermission("explorer.schemas.list"))
 		.input(listSchemasInput)
@@ -331,23 +389,39 @@ export const explorerRouter = router({
 				pagination: input.pagination,
 			});
 
-			let provider: PostgresProvider | null = null;
+			let providerInfo: ProviderInfo | null = null;
 			try {
-				provider = await getProvider(input.connectionId, input.database);
+				providerInfo = await getProviderInfo(input.connectionId, input.database);
 
 				const pagination = {
 					limit: input.pagination?.limit ?? EXPLORER_DEFAULT_LIMIT,
 					offset: input.pagination?.offset ?? 0,
 				};
 
-				const result = await provider.listSchemasPaginated(pagination, input.database);
+				let items: ExplorerSchemaInfo[];
+				let result: { total: number; offset: number; limit: number; hasMore: boolean };
 
-				const items: ExplorerSchemaInfo[] = result.items.map((schema) => ({
-					name: schema.name,
-					owner: schema.owner,
-					database: schema.database,
-					treeMeta: createSchemaTreeMeta(schema.database, schema.name),
-				}));
+				if (providerInfo.type === "sqlite") {
+					const sqliteProvider = providerInfo.provider as SqliteProvider;
+					const sqliteResult = await sqliteProvider.listSchemasPaginated(pagination, input.database);
+					items = sqliteResult.items.map((schema) => ({
+						name: schema.name,
+						owner: schema.owner,
+						database: schema.database,
+						treeMeta: createSchemaTreeMeta(schema.database, schema.name),
+					}));
+					result = sqliteResult;
+				} else {
+					const pgProvider = providerInfo.provider as PostgresProvider;
+					const pgResult = await pgProvider.listSchemasPaginated(pagination, input.database);
+					items = pgResult.items.map((schema) => ({
+						name: schema.name,
+						owner: schema.owner,
+						database: schema.database,
+						treeMeta: createSchemaTreeMeta(schema.database, schema.name),
+					}));
+					result = pgResult;
+				}
 
 				logger.info("[Explorer] listSchemas completed", {
 					count: items.length,
@@ -369,12 +443,12 @@ export const explorerRouter = router({
 				logger.error("[Explorer] listSchemas failed", error);
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
-					message: "Failed to list schemas",
+					message: error instanceof Error ? error.message : "Failed to list schemas",
 					cause: error,
 				});
 			} finally {
-				if (provider) {
-					await provider.disconnect().catch((err) => {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
 						logger.warn("[Explorer] Failed to disconnect provider", err);
 					});
 				}
@@ -386,7 +460,7 @@ export const explorerRouter = router({
 	 */
 	listTables: publicProcedure
 		.use(logging)
-		.use(rateLimit({ limit: 100, windowInSeconds: 60 }))
+		.use(rateLimit({ limit: 10000, windowInSeconds: 60 }))
 		.use(withUserContext)
 		.use(requirePermission("explorer.tables.list"))
 		.input(listTablesInput)
@@ -399,26 +473,48 @@ export const explorerRouter = router({
 				pagination: input.pagination,
 			});
 
-			let provider: PostgresProvider | null = null;
+			let providerInfo: ProviderInfo | null = null;
 			try {
-				provider = await getProvider(input.connectionId, input.database);
+				providerInfo = await getProviderInfo(input.connectionId, input.database);
 
 				const pagination = {
 					limit: input.pagination?.limit ?? EXPLORER_DEFAULT_LIMIT,
 					offset: input.pagination?.offset ?? 0,
 				};
 
-				const result = await provider.listTablesPaginated(input.schema, pagination);
+				// For SQLite, use "main" schema if "public" was requested (default for PostgreSQL)
+				const schema = providerInfo.type === "sqlite" && input.schema === "public" ? "main" : input.schema;
 
-				const items: ExplorerTableInfo[] = result.items.map((table) => ({
-					name: table.name,
-					schema: table.schema,
-					type: table.type,
-					owner: table.owner,
-					rowCount: table.rowCount,
-					size: table.size,
-					treeMeta: createTableTreeMeta(table.schema, table.name, table.type),
-				}));
+				let items: ExplorerTableInfo[];
+				let result: { total: number; offset: number; limit: number; hasMore: boolean };
+
+				if (providerInfo.type === "sqlite") {
+					const sqliteProvider = providerInfo.provider as SqliteProvider;
+					const sqliteResult = await sqliteProvider.listTablesPaginated(schema, pagination);
+					items = sqliteResult.items.map((table) => ({
+						name: table.name,
+						schema: table.schema,
+						type: table.type as "table" | "view" | "materialized_view",
+						owner: table.owner,
+						rowCount: table.rowCount,
+						size: table.size,
+						treeMeta: createTableTreeMeta(table.schema, table.name, table.type as "table" | "view" | "materialized_view"),
+					}));
+					result = sqliteResult;
+				} else {
+					const pgProvider = providerInfo.provider as PostgresProvider;
+					const pgResult = await pgProvider.listTablesPaginated(schema, pagination);
+					items = pgResult.items.map((table) => ({
+						name: table.name,
+						schema: table.schema,
+						type: table.type,
+						owner: table.owner,
+						rowCount: table.rowCount,
+						size: table.size,
+						treeMeta: createTableTreeMeta(table.schema, table.name, table.type),
+					}));
+					result = pgResult;
+				}
 
 				logger.info("[Explorer] listTables completed", {
 					count: items.length,
@@ -440,12 +536,12 @@ export const explorerRouter = router({
 				logger.error("[Explorer] listTables failed", error);
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
-					message: "Failed to list tables",
+					message: error instanceof Error ? error.message : "Failed to list tables",
 					cause: error,
 				});
 			} finally {
-				if (provider) {
-					await provider.disconnect().catch((err) => {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
 						logger.warn("[Explorer] Failed to disconnect provider", err);
 					});
 				}
@@ -473,6 +569,7 @@ export const explorerRouter = router({
 				hasConnection: !!activeConnection,
 				connectionId: activeConnection?.id ?? null,
 				connectionName: activeConnection?.name ?? null,
+				providerType: activeConnection?.providerType ?? null,
 			};
 		}),
 
@@ -481,7 +578,7 @@ export const explorerRouter = router({
 	 */
 	getTableData: publicProcedure
 		.use(logging)
-		.use(rateLimit({ limit: 100, windowInSeconds: 60 }))
+		.use(rateLimit({ limit: 10000, windowInSeconds: 60 }))
 		.use(withUserContext)
 		.use(requirePermission("explorer.tables.read"))
 		.input(getTableDataInput)
@@ -496,21 +593,24 @@ export const explorerRouter = router({
 				offset: input.offset,
 			});
 
-			let provider: PostgresProvider | null = null;
+			let providerInfo: ProviderInfo | null = null;
 			try {
-				provider = await getProvider(input.connectionId, input.database);
+				providerInfo = await getProviderInfo(input.connectionId, input.database);
+
+				// For SQLite, use "main" schema if "public" was requested (default for PostgreSQL)
+				const schema = providerInfo.type === "sqlite" && input.schema === "public" ? "main" : input.schema;
 
 				// Get table data
-				const result = await provider.selectRows({
-					schema: input.schema,
+				const result = await providerInfo.provider.selectRows({
+					schema,
 					table: input.table,
 					limit: input.limit,
 					offset: input.offset,
 				});
 
 				// Get row count
-				const countResult = await provider.countRows({
-					schema: input.schema,
+				const countResult = await providerInfo.provider.countRows({
+					schema,
 					table: input.table,
 				});
 
@@ -538,8 +638,8 @@ export const explorerRouter = router({
 					cause: error,
 				});
 			} finally {
-				if (provider) {
-					await provider.disconnect().catch((err) => {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
 						logger.warn("[Explorer] Failed to disconnect provider", err);
 					});
 				}
@@ -551,7 +651,7 @@ export const explorerRouter = router({
 	 */
 	getTableStructure: publicProcedure
 		.use(logging)
-		.use(rateLimit({ limit: 100, windowInSeconds: 60 }))
+		.use(rateLimit({ limit: 10000, windowInSeconds: 60 }))
 		.use(withUserContext)
 		.use(requirePermission("explorer.tables.read"))
 		.input(getTableStructureInput)
@@ -564,11 +664,14 @@ export const explorerRouter = router({
 				table: input.table,
 			});
 
-			let provider: PostgresProvider | null = null;
+			let providerInfo: ProviderInfo | null = null;
 			try {
-				provider = await getProvider(input.connectionId, input.database);
+				providerInfo = await getProviderInfo(input.connectionId, input.database);
 
-				const structure = await provider.getTableStructure(input.schema, input.table);
+				// For SQLite, use "main" schema if "public" was requested (default for PostgreSQL)
+				const schema = providerInfo.type === "sqlite" && input.schema === "public" ? "main" : input.schema;
+
+				const structure = await providerInfo.provider.getTableStructure(schema, input.table);
 
 				logger.info("[Explorer] getTableStructure completed", {
 					columnCount: structure.columns.length,
@@ -589,8 +692,8 @@ export const explorerRouter = router({
 					cause: error,
 				});
 			} finally {
-				if (provider) {
-					await provider.disconnect().catch((err) => {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
 						logger.warn("[Explorer] Failed to disconnect provider", err);
 					});
 				}
@@ -598,11 +701,11 @@ export const explorerRouter = router({
 		}),
 
 	/**
-	 * Get active connections to a database
+	 * Get active connections to a database (PostgreSQL only)
 	 */
 	getDatabaseConnections: publicProcedure
 		.use(logging)
-		.use(rateLimit({ limit: 100, windowInSeconds: 60 }))
+		.use(rateLimit({ limit: 10000, windowInSeconds: 60 }))
 		.use(withUserContext)
 		.use(requirePermission("explorer.databases.list"))
 		.input(getDatabaseConnectionsInput)
@@ -613,11 +716,20 @@ export const explorerRouter = router({
 				databaseName: input.databaseName,
 			});
 
-			let provider: PostgresProvider | null = null;
+			let providerInfo: ProviderInfo | null = null;
 			try {
-				provider = await getProvider(input.connectionId);
+				providerInfo = await getProviderInfo(input.connectionId);
 
-				const result = await provider.getDatabaseConnections(input.databaseName);
+				// This is a PostgreSQL-specific operation
+				if (providerInfo.type === "sqlite") {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "getDatabaseConnections is not supported for SQLite databases",
+					});
+				}
+
+				const pgProvider = providerInfo.provider as PostgresProvider;
+				const result = await pgProvider.getDatabaseConnections(input.databaseName);
 
 				logger.info("[Explorer] getDatabaseConnections completed", {
 					databaseName: input.databaseName,
@@ -631,6 +743,9 @@ export const explorerRouter = router({
 					timestamp: Date.now(),
 				};
 			} catch (error) {
+				if (error instanceof TRPCError) {
+					throw error;
+				}
 				logger.error("[Explorer] getDatabaseConnections failed", error);
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
@@ -638,8 +753,8 @@ export const explorerRouter = router({
 					cause: error,
 				});
 			} finally {
-				if (provider) {
-					await provider.disconnect().catch((err) => {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
 						logger.warn("[Explorer] Failed to disconnect provider", err);
 					});
 				}
@@ -647,11 +762,11 @@ export const explorerRouter = router({
 		}),
 
 	/**
-	 * Create a new database
+	 * Create a new database (PostgreSQL only)
 	 */
 	createDatabase: publicProcedure
 		.use(logging)
-		.use(rateLimit({ limit: 10, windowInSeconds: 60 }))
+		.use(rateLimit({ limit: 1000, windowInSeconds: 60 }))
 		.use(withUserContext)
 		.use(requirePermission("explorer.databases.write"))
 		.input(createDatabaseInput)
@@ -665,11 +780,20 @@ export const explorerRouter = router({
 				template: input.template,
 			});
 
-			let provider: PostgresProvider | null = null;
+			let providerInfo: ProviderInfo | null = null;
 			try {
-				provider = await getProvider(input.connectionId);
+				providerInfo = await getProviderInfo(input.connectionId);
 
-				await provider.createDatabase(input.databaseName, {
+				// This is a PostgreSQL-specific operation
+				if (providerInfo.type === "sqlite") {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "createDatabase is not supported for SQLite. SQLite databases are created by opening a new file.",
+					});
+				}
+
+				const pgProvider = providerInfo.provider as PostgresProvider;
+				await pgProvider.createDatabase(input.databaseName, {
 					owner: input.owner,
 					encoding: input.encoding,
 					template: input.template,
@@ -686,6 +810,9 @@ export const explorerRouter = router({
 					timestamp: Date.now(),
 				};
 			} catch (error) {
+				if (error instanceof TRPCError) {
+					throw error;
+				}
 				logger.error("[Explorer] createDatabase failed", error);
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
@@ -693,8 +820,8 @@ export const explorerRouter = router({
 					cause: error,
 				});
 			} finally {
-				if (provider) {
-					await provider.disconnect().catch((err) => {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
 						logger.warn("[Explorer] Failed to disconnect provider", err);
 					});
 				}
@@ -702,11 +829,11 @@ export const explorerRouter = router({
 		}),
 
 	/**
-	 * Rename a database
+	 * Rename a database (PostgreSQL only)
 	 */
 	renameDatabase: publicProcedure
 		.use(logging)
-		.use(rateLimit({ limit: 20, windowInSeconds: 60 }))
+		.use(rateLimit({ limit: 1000, windowInSeconds: 60 }))
 		.use(withUserContext)
 		.use(requirePermission("explorer.databases.write"))
 		.input(renameDatabaseInput)
@@ -719,11 +846,20 @@ export const explorerRouter = router({
 				force: input.force,
 			});
 
-			let provider: PostgresProvider | null = null;
+			let providerInfo: ProviderInfo | null = null;
 			try {
-				provider = await getProvider(input.connectionId);
+				providerInfo = await getProviderInfo(input.connectionId);
 
-				await provider.renameDatabase(input.oldName, input.newName, input.force);
+				// This is a PostgreSQL-specific operation
+				if (providerInfo.type === "sqlite") {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "renameDatabase is not supported for SQLite. Rename the database file directly.",
+					});
+				}
+
+				const pgProvider = providerInfo.provider as PostgresProvider;
+				await pgProvider.renameDatabase(input.oldName, input.newName, input.force);
 
 				logger.info("[Explorer] renameDatabase completed", {
 					oldName: input.oldName,
@@ -739,6 +875,9 @@ export const explorerRouter = router({
 					timestamp: Date.now(),
 				};
 			} catch (error) {
+				if (error instanceof TRPCError) {
+					throw error;
+				}
 				logger.error("[Explorer] renameDatabase failed", error);
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
@@ -746,8 +885,8 @@ export const explorerRouter = router({
 					cause: error,
 				});
 			} finally {
-				if (provider) {
-					await provider.disconnect().catch((err) => {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
 						logger.warn("[Explorer] Failed to disconnect provider", err);
 					});
 				}
@@ -755,11 +894,11 @@ export const explorerRouter = router({
 		}),
 
 	/**
-	 * Delete a database
+	 * Delete a database (PostgreSQL only)
 	 */
 	deleteDatabase: publicProcedure
 		.use(logging)
-		.use(rateLimit({ limit: 10, windowInSeconds: 60 }))
+		.use(rateLimit({ limit: 1000, windowInSeconds: 60 }))
 		.use(withUserContext)
 		.use(requirePermission("explorer.databases.write"))
 		.input(deleteDatabaseInput)
@@ -771,11 +910,20 @@ export const explorerRouter = router({
 				force: input.force,
 			});
 
-			let provider: PostgresProvider | null = null;
+			let providerInfo: ProviderInfo | null = null;
 			try {
-				provider = await getProvider(input.connectionId);
+				providerInfo = await getProviderInfo(input.connectionId);
 
-				await provider.deleteDatabase(input.databaseName, input.force);
+				// This is a PostgreSQL-specific operation
+				if (providerInfo.type === "sqlite") {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "deleteDatabase is not supported for SQLite. Delete the database file directly.",
+					});
+				}
+
+				const pgProvider = providerInfo.provider as PostgresProvider;
+				await pgProvider.deleteDatabase(input.databaseName, input.force);
 
 				logger.info("[Explorer] deleteDatabase completed", {
 					databaseName: input.databaseName,
@@ -789,6 +937,9 @@ export const explorerRouter = router({
 					timestamp: Date.now(),
 				};
 			} catch (error) {
+				if (error instanceof TRPCError) {
+					throw error;
+				}
 				logger.error("[Explorer] deleteDatabase failed", error);
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
@@ -796,8 +947,8 @@ export const explorerRouter = router({
 					cause: error,
 				});
 			} finally {
-				if (provider) {
-					await provider.disconnect().catch((err) => {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
 						logger.warn("[Explorer] Failed to disconnect provider", err);
 					});
 				}

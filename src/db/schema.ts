@@ -4,6 +4,7 @@ import { integer, sqliteTable, text, index } from "drizzle-orm/sqlite-core";
 /**
  * Connections table - stores database connection configurations
  * Credentials (password) are encrypted using AES-256-GCM
+ * Supports multiple provider types including SQLite (file-based)
  */
 export const connections = sqliteTable(
 	"connections",
@@ -11,18 +12,23 @@ export const connections = sqliteTable(
 		id: integer().primaryKey({ autoIncrement: true }),
 		name: text().notNull(),
 		providerType: text("provider_type").notNull(), // 'postgres' | 'mysql' | 'sqlite' | 'mongodb' | 'redis'
-		host: text().notNull(),
-		port: integer().notNull(),
-		database: text().notNull(),
-		username: text().notNull(),
+		// Common connection fields (used by postgres, mysql, mongodb, redis)
+		// These can be empty for SQLite which uses filepath instead
+		host: text().default(""),
+		port: integer().default(0),
+		database: text().default(""),
+		username: text().default(""),
 		// Encrypted password (base64 encoded: IV + AuthTag + Ciphertext)
-		encryptedPassword: text("encrypted_password").notNull(),
+		encryptedPassword: text("encrypted_password").default(""),
 		// SSL configuration stored as JSON
 		sslConfig: text("ssl_config"), // JSON: { enabled: boolean, rejectUnauthorized?: boolean }
-		// Connection pool settings
+		// Connection pool settings (not used by SQLite)
 		maxPoolSize: integer("max_pool_size").default(10),
 		idleTimeoutMs: integer("idle_timeout_ms").default(30000),
 		connectionTimeoutMs: integer("connection_timeout_ms").default(5000),
+		// SQLite-specific configuration stored as JSON
+		// JSON: { filepath: string, readonly: boolean, fileMustExist: boolean, enableWAL: boolean, enableForeignKeys: boolean }
+		sqliteConfig: text("sqlite_config"),
 		// Active connection flag - only one connection can be active at a time
 		isActive: integer("is_active", { mode: "boolean" }).default(false).notNull(),
 		// Metadata

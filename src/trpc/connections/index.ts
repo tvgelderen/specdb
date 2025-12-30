@@ -22,18 +22,35 @@ const sslConfigSchema = z
 	.nullable()
 	.optional();
 
+/**
+ * SQLite-specific configuration schema
+ */
+const sqliteConfigSchema = z
+	.object({
+		filepath: z.string().min(1, "File path is required"),
+		readonly: z.boolean().default(false),
+		fileMustExist: z.boolean().default(true),
+		enableWAL: z.boolean().default(true),
+		enableForeignKeys: z.boolean().default(true),
+	})
+	.nullable()
+	.optional();
+
 const createConnectionSchema = z.object({
 	name: z.string().min(1, "Connection name is required").max(255),
 	providerType: providerTypeSchema,
-	host: z.string().min(1, "Host is required"),
-	port: z.number().int().min(1).max(65535),
-	database: z.string().min(1, "Database name is required"),
-	username: z.string().min(1, "Username is required"),
-	password: z.string(), // Can be empty for some auth methods
+	// These fields are optional for SQLite connections
+	host: z.string().default(""),
+	port: z.number().int().min(0).max(65535).default(0),
+	database: z.string().default(""),
+	username: z.string().default(""),
+	password: z.string().default(""), // Can be empty for SQLite or some auth methods
 	sslConfig: sslConfigSchema,
 	maxPoolSize: z.number().int().min(1).max(100).default(10),
 	idleTimeoutMs: z.number().int().min(0).max(3600000).default(30000),
 	connectionTimeoutMs: z.number().int().min(100).max(60000).default(5000),
+	// SQLite-specific configuration
+	sqliteConfig: sqliteConfigSchema,
 	color: z.string().max(50).nullable().optional(),
 	notes: z.string().max(1000).nullable().optional(),
 });
@@ -42,29 +59,44 @@ const updateConnectionSchema = z.object({
 	id: z.number().int().positive(),
 	name: z.string().min(1).max(255).optional(),
 	providerType: providerTypeSchema.optional(),
-	host: z.string().min(1).optional(),
-	port: z.number().int().min(1).max(65535).optional(),
-	database: z.string().min(1).optional(),
-	username: z.string().min(1).optional(),
+	host: z.string().optional(),
+	port: z.number().int().min(0).max(65535).optional(),
+	database: z.string().optional(),
+	username: z.string().optional(),
 	password: z.string().optional(), // Only update if provided
 	sslConfig: sslConfigSchema,
 	maxPoolSize: z.number().int().min(1).max(100).optional(),
 	idleTimeoutMs: z.number().int().min(0).max(3600000).optional(),
 	connectionTimeoutMs: z.number().int().min(100).max(60000).optional(),
+	sqliteConfig: sqliteConfigSchema,
 	color: z.string().max(50).nullable().optional(),
 	notes: z.string().max(1000).nullable().optional(),
 });
 
 const testConnectionSchema = z.object({
 	providerType: providerTypeSchema,
-	host: z.string().min(1),
-	port: z.number().int().min(1).max(65535),
-	database: z.string().min(1),
-	username: z.string().min(1),
-	password: z.string(),
+	// Common connection fields (optional for SQLite)
+	host: z.string().optional(),
+	port: z.number().int().min(0).max(65535).optional(),
+	database: z.string().optional(),
+	username: z.string().optional(),
+	password: z.string().optional(),
 	sslConfig: sslConfigSchema,
 	connectionTimeoutMs: z.number().int().min(100).max(60000).default(5000),
+	// SQLite-specific configuration
+	sqliteConfig: sqliteConfigSchema,
 });
+
+/**
+ * SQLite config type
+ */
+interface SqliteConfig {
+	filepath: string;
+	readonly: boolean;
+	fileMustExist: boolean;
+	enableWAL: boolean;
+	enableForeignKeys: boolean;
+}
 
 /**
  * Response type for connection without the encrypted password
@@ -73,14 +105,15 @@ interface SafeConnection {
 	id: number;
 	name: string;
 	providerType: string;
-	host: string;
-	port: number;
-	database: string;
-	username: string;
+	host: string | null;
+	port: number | null;
+	database: string | null;
+	username: string | null;
 	sslConfig: { enabled: boolean; rejectUnauthorized?: boolean } | null;
 	maxPoolSize: number | null;
 	idleTimeoutMs: number | null;
 	connectionTimeoutMs: number | null;
+	sqliteConfig: SqliteConfig | null;
 	isActive: boolean;
 	color: string | null;
 	notes: string | null;
@@ -104,6 +137,7 @@ function toSafeConnection(conn: Connection): SafeConnection {
 		maxPoolSize: conn.maxPoolSize,
 		idleTimeoutMs: conn.idleTimeoutMs,
 		connectionTimeoutMs: conn.connectionTimeoutMs,
+		sqliteConfig: conn.sqliteConfig ? JSON.parse(conn.sqliteConfig) : null,
 		isActive: conn.isActive,
 		color: conn.color,
 		notes: conn.notes,
@@ -116,14 +150,29 @@ function toSafeConnection(conn: Connection): SafeConnection {
  * Build provider-specific connection config from stored connection
  */
 function buildProviderConfig(conn: Connection, decryptedPassword: string): Record<string, unknown> {
+	// Handle SQLite connections differently
+	if (conn.providerType === "sqlite") {
+		const sqliteConfig = conn.sqliteConfig ? JSON.parse(conn.sqliteConfig) : null;
+		if (!sqliteConfig) {
+			throw new Error("SQLite connection requires sqliteConfig");
+		}
+		return {
+			filepath: sqliteConfig.filepath,
+			readonly: sqliteConfig.readonly ?? false,
+			fileMustExist: sqliteConfig.fileMustExist ?? true,
+			enableWAL: sqliteConfig.enableWAL ?? true,
+			enableForeignKeys: sqliteConfig.enableForeignKeys ?? true,
+		};
+	}
+
 	const sslConfig = conn.sslConfig ? JSON.parse(conn.sslConfig) : null;
 
-	// Base config shared by most providers
+	// Base config shared by most providers (postgres, mysql, etc.)
 	const baseConfig = {
-		host: conn.host,
-		port: conn.port,
-		database: conn.database,
-		user: conn.username,
+		host: conn.host ?? "localhost",
+		port: conn.port ?? 5432,
+		database: conn.database ?? "",
+		user: conn.username ?? "",
 		password: decryptedPassword,
 		max: conn.maxPoolSize ?? 10,
 		idleTimeoutMillis: conn.idleTimeoutMs ?? 30000,
@@ -150,20 +199,21 @@ export const connectionsRouter = router({
 	create: publicProcedure.input(createConnectionSchema).mutation(async ({ input }) => {
 		logger.info(`[Connections] Creating connection: ${input.name}`);
 
-		// Encrypt the password before storing
-		const encryptedPassword = encrypt(input.password);
+		// Encrypt the password before storing (empty string for SQLite)
+		const encryptedPassword = encrypt(input.password ?? "");
 
 		const result = db
 			.insert(connections)
 			.values({
 				name: input.name,
 				providerType: input.providerType,
-				host: input.host,
-				port: input.port,
-				database: input.database,
-				username: input.username,
+				host: input.host ?? "",
+				port: input.port ?? 0,
+				database: input.database ?? "",
+				username: input.username ?? "",
 				encryptedPassword,
 				sslConfig: input.sslConfig ? JSON.stringify(input.sslConfig) : null,
+				sqliteConfig: input.sqliteConfig ? JSON.stringify(input.sqliteConfig) : null,
 				maxPoolSize: input.maxPoolSize,
 				idleTimeoutMs: input.idleTimeoutMs,
 				connectionTimeoutMs: input.connectionTimeoutMs,
@@ -222,7 +272,7 @@ export const connectionsRouter = router({
 	 * Update a connection
 	 */
 	update: publicProcedure.input(updateConnectionSchema).mutation(async ({ input }) => {
-		const { id, password, sslConfig, ...updateData } = input;
+		const { id, password, sslConfig, sqliteConfig, ...updateData } = input;
 
 		logger.info(`[Connections] Updating connection: ${id}`);
 
@@ -246,6 +296,11 @@ export const connectionsRouter = router({
 		// Handle SSL config
 		if (sslConfig !== undefined) {
 			updateValues.sslConfig = sslConfig ? JSON.stringify(sslConfig) : null;
+		}
+
+		// Handle SQLite config
+		if (sqliteConfig !== undefined) {
+			updateValues.sqliteConfig = sqliteConfig ? JSON.stringify(sqliteConfig) : null;
 		}
 
 		// Only update password if provided
@@ -341,9 +396,13 @@ export const connectionsRouter = router({
 	 * Test a connection with provided credentials (without saving)
 	 */
 	test: publicProcedure.input(testConnectionSchema).mutation(async ({ input }) => {
-		logger.info(`[Connections] Testing connection: ${input.providerType}://${input.host}:${input.port}/${input.database}`);
-
 		const providerType = input.providerType as ProviderType;
+
+		if (providerType === "sqlite") {
+			logger.info(`[Connections] Testing SQLite connection: ${input.sqliteConfig?.filepath}`);
+		} else {
+			logger.info(`[Connections] Testing connection: ${input.providerType}://${input.host}:${input.port}/${input.database}`);
+		}
 
 		// Check if the provider is registered
 		if (!ProviderRegistry.isRegistered(providerType)) {
@@ -357,20 +416,39 @@ export const connectionsRouter = router({
 		const startTime = Date.now();
 
 		try {
-			// Build connection config
-			const config = {
-				host: input.host,
-				port: input.port,
-				database: input.database,
-				user: input.username,
-				password: input.password,
-				connectionTimeoutMillis: input.connectionTimeoutMs,
-				ssl: input.sslConfig?.enabled
-					? input.sslConfig.rejectUnauthorized !== undefined
-						? { rejectUnauthorized: input.sslConfig.rejectUnauthorized }
-						: true
-					: undefined,
-			};
+			// Build connection config based on provider type
+			let config: Record<string, unknown>;
+
+			if (providerType === "sqlite") {
+				if (!input.sqliteConfig?.filepath) {
+					return {
+						success: false,
+						message: "SQLite connection requires a file path",
+						latencyMs: 0,
+					};
+				}
+				config = {
+					filepath: input.sqliteConfig.filepath,
+					readonly: input.sqliteConfig.readonly ?? false,
+					fileMustExist: input.sqliteConfig.fileMustExist ?? true,
+					enableWAL: input.sqliteConfig.enableWAL ?? true,
+					enableForeignKeys: input.sqliteConfig.enableForeignKeys ?? true,
+				};
+			} else {
+				config = {
+					host: input.host ?? "localhost",
+					port: input.port ?? 5432,
+					database: input.database ?? "",
+					user: input.username ?? "",
+					password: input.password ?? "",
+					connectionTimeoutMillis: input.connectionTimeoutMs,
+					ssl: input.sslConfig?.enabled
+						? input.sslConfig.rejectUnauthorized !== undefined
+							? { rejectUnauthorized: input.sslConfig.rejectUnauthorized }
+							: true
+						: undefined,
+				};
+			}
 
 			// Create a temporary provider instance to test
 			const provider = ProviderRegistry.createProvider(providerType, config);
@@ -430,8 +508,8 @@ export const connectionsRouter = router({
 			const startTime = Date.now();
 
 			try {
-				// Decrypt password
-				const decryptedPassword = decrypt(conn.encryptedPassword);
+				// Decrypt password (empty string for SQLite)
+				const decryptedPassword = decrypt(conn.encryptedPassword ?? "");
 
 				// Build connection config
 				const config = buildProviderConfig(conn, decryptedPassword);
@@ -478,7 +556,7 @@ export const connectionsRouter = router({
 		}
 
 		try {
-			const decryptedPassword = decrypt(conn.encryptedPassword);
+			const decryptedPassword = decrypt(conn.encryptedPassword ?? "");
 			return {
 				...toSafeConnection(conn),
 				config: buildProviderConfig(conn, decryptedPassword),
