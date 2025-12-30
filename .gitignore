@@ -1,0 +1,14 @@
+node_modules
+
+data
+logs
+
+.tanstack
+.output
+.nitro
+
+.env
+
+drizzle/dev
+
+routeTree.gen.ts
