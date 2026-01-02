@@ -1,5 +1,5 @@
 import * as React from "react";
-import { TableIcon, ColumnsIcon, ShieldCheckIcon, DatabaseIcon } from "lucide-react";
+import { TableIcon, ColumnsIcon, ShieldCheckIcon, DatabaseIcon, Trash2Icon, XIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
 import {
 	DataGrid,
@@ -10,6 +10,7 @@ import {
 	type ColumnDef,
 	type DataGridState,
 } from "~/components/ui/data-grid";
+import { Button } from "~/components/ui/button";
 import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "~/components/ui/empty";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "~/components/ui/tabs";
 import { CellDataViewer, shouldShowViewer } from "~/components/ui/cell-data-viewer";
@@ -23,6 +24,7 @@ import {
 } from "./table-structure-view";
 import { TableConstraintsView, TableConstraintsViewSkeleton, type ConstraintInfo } from "./table-constraints-view";
 import { TableIndexesView, TableIndexesViewSkeleton, type IndexViewInfo } from "./table-indexes-view";
+import { DeleteRowsDialog } from "./delete-rows-dialog";
 import { useTableViewState } from "./use-table-view-state";
 import type { TableIdentifier, TableViewState, TableColumn } from "./types";
 import type { TimingMetrics } from "~/components/ui/timing-badge";
@@ -93,6 +95,10 @@ export interface TableViewProps<T extends TableRowData = TableRowData> {
 	onTabChange?: (tab: TableViewTab) => void;
 	/** Query timing metrics (optional) */
 	timing?: TimingMetrics | null;
+	/** Callback when rows are deleted */
+	onDeleteRows?: (primaryKeyColumn: string, primaryKeyValues: unknown[]) => Promise<void>;
+	/** Whether delete operation is in progress */
+	isDeleting?: boolean;
 }
 
 // ============================================================================
@@ -336,6 +342,8 @@ export function TableView<T extends TableRowData = TableRowData>({
 	activeTab: externalActiveTab,
 	onTabChange,
 	timing,
+	onDeleteRows,
+	isDeleting = false,
 }: TableViewProps<T>) {
 	// Tab state management
 	const [internalActiveTab, setInternalActiveTab] = React.useState<TableViewTab>("data");
@@ -359,6 +367,41 @@ export function TableView<T extends TableRowData = TableRowData>({
 		? (updates: Partial<TableViewState>) => onStateChange({ ...state, ...updates })
 		: updateInternalState;
 
+	// Selection state
+	const [selectedRows, setSelectedRows] = React.useState<Set<number>>(new Set());
+	const [showDeleteDialog, setShowDeleteDialog] = React.useState(false);
+
+	// Find primary key column from structure data
+	const primaryKeyColumn = React.useMemo(() => {
+		const pkColumn = columns.find((col) => col.isPrimaryKey);
+		return pkColumn?.name ?? null;
+	}, [columns]);
+
+	// Clear selection when page changes or data reloads
+	React.useEffect(() => {
+		setSelectedRows(new Set());
+	}, [state.page, state.pageSize, data]);
+
+	// Get selected row data for deletion
+	const getSelectedPrimaryKeyValues = React.useCallback(() => {
+		if (!primaryKeyColumn) return [];
+		const startIndex = (state.page - 1) * state.pageSize;
+		return Array.from(selectedRows).map((rowIndex) => {
+			const row = data[startIndex + rowIndex];
+			return row?.[primaryKeyColumn];
+		}).filter((value) => value !== undefined);
+	}, [selectedRows, primaryKeyColumn, data, state.page, state.pageSize]);
+
+	// Handle delete confirmation
+	const handleDeleteConfirm = React.useCallback(async () => {
+		if (!onDeleteRows || !primaryKeyColumn) return;
+		const values = getSelectedPrimaryKeyValues();
+		if (values.length === 0) return;
+		await onDeleteRows(primaryKeyColumn, values);
+		setSelectedRows(new Set());
+		setShowDeleteDialog(false);
+	}, [onDeleteRows, primaryKeyColumn, getSelectedPrimaryKeyValues]);
+
 	// Convert columns to DataGrid format
 	const gridColumns = React.useMemo(() => columnsToDataGridDefs<T>(columns), [columns]);
 
@@ -372,6 +415,9 @@ export function TableView<T extends TableRowData = TableRowData>({
 
 	// Convert state for DataGrid
 	const gridState = React.useMemo(() => toDataGridState(state), [state]);
+
+	// Check if selection is enabled (need PK and delete handler)
+	const selectionEnabled = !!primaryKeyColumn && !!onDeleteRows;
 
 	// Context value
 	const contextValue = React.useMemo<TableViewContextValue>(
@@ -448,11 +494,40 @@ export function TableView<T extends TableRowData = TableRowData>({
 								loading={loading}
 								state={gridState}
 								onStateChange={handleGridStateChange}
+								selectable={selectionEnabled}
+								selectedRows={selectedRows}
+								onSelectionChange={setSelectedRows}
 							>
+								{/* Bulk Actions Toolbar */}
+								{selectedRows.size > 0 && (
+									<div className="flex items-center gap-3 p-3 bg-muted/50 border rounded-lg">
+										<span className="text-sm font-medium">
+											{selectedRows.size} row{selectedRows.size !== 1 ? "s" : ""} selected
+										</span>
+										<div className="flex-1" />
+										<Button
+											variant="ghost"
+											size="sm"
+											onClick={() => setSelectedRows(new Set())}
+										>
+											<XIcon className="size-4" />
+											Clear
+										</Button>
+										<Button
+											variant="destructive"
+											size="sm"
+											onClick={() => setShowDeleteDialog(true)}
+											disabled={isDeleting}
+										>
+											<Trash2Icon className="size-4" />
+											Delete
+										</Button>
+									</div>
+								)}
 								<DataGridToolbar />
 								{loading ? (
 									<DataGridSkeleton
-										columns={columns.length || 5}
+										columns={(selectionEnabled ? 1 : 0) + (columns.length || 5)}
 										rows={Math.min(state.pageSize, 10)}
 									/>
 								) : (
@@ -461,6 +536,15 @@ export function TableView<T extends TableRowData = TableRowData>({
 								<DataGridPagination />
 							</DataGrid>
 						)}
+
+						{/* Delete Confirmation Dialog */}
+						<DeleteRowsDialog
+							open={showDeleteDialog}
+							onOpenChange={setShowDeleteDialog}
+							rowCount={selectedRows.size}
+							onConfirm={handleDeleteConfirm}
+							isDeleting={isDeleting}
+						/>
 					</TabsContent>
 
 					{/* Structure Tab Content */}

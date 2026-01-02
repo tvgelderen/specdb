@@ -24,10 +24,11 @@ const sslConfigSchema = z
 
 /**
  * SQLite-specific configuration schema
+ * Note: filepath requirement is validated at runtime based on providerType
  */
 const sqliteConfigSchema = z
 	.object({
-		filepath: z.string().min(1, "File path is required"),
+		filepath: z.string(),
 		readonly: z.boolean().default(false),
 		fileMustExist: z.boolean().default(true),
 		enableWAL: z.boolean().default(true),

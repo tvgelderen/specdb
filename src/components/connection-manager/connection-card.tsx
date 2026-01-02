@@ -1,4 +1,4 @@
-import { CheckCircle2, Circle, Database, Edit2, Loader2, MoreVertical, Play, Trash, Unplug, Zap } from "lucide-react";
+import { Edit2, Loader2, MoreVertical, Trash, Zap } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent } from "~/components/ui/card";
 import {
@@ -54,30 +54,30 @@ export function ConnectionCard({
 			)}
 		>
 			<CardContent className="flex items-center gap-4 p-4">
-				{/* Selection indicator */}
-				<button
-					type="button"
-					onClick={isActive ? onDisconnect : onConnect}
-					disabled={isConnecting}
-					className={cn(
-						"flex-shrink-0 rounded-full p-1 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-						isActive ? "text-success hover:text-success/80" : "text-muted-foreground hover:text-foreground",
-					)}
-				>
-					{isConnecting ? (
-						<Loader2 className="size-5 animate-spin" />
-					) : isActive ? (
-						<CheckCircle2 className="size-5" />
-					) : (
-						<Circle className="size-5" />
-					)}
-				</button>
-
-				{/* Color indicator */}
-				<div
-					className="size-3 rounded-full flex-shrink-0"
-					style={{ backgroundColor: connection.color || "#6B7280" }}
-				/>
+				{/* Radio-style connect button */}
+				<Tooltip>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							onClick={isActive ? onDisconnect : onConnect}
+							disabled={isConnecting}
+							className={cn(
+								"size-5 rounded-full flex-shrink-0 border-2 transition-all flex items-center justify-center",
+								isActive
+									? "border-success bg-success"
+									: "border-muted-foreground/40 hover:border-muted-foreground",
+								isConnecting && "opacity-50 cursor-not-allowed",
+							)}
+						>
+							{isConnecting ? (
+								<Loader2 className="size-3 animate-spin text-white" />
+							) : (
+								isActive && <div className="size-2 rounded-full bg-white" />
+							)}
+						</button>
+					</TooltipTrigger>
+					<TooltipContent>{isActive ? "Disconnect" : "Connect"}</TooltipContent>
+				</Tooltip>
 
 				{/* Connection info */}
 				<div className="flex-1 min-w-0">
@@ -104,33 +104,6 @@ export function ConnectionCard({
 
 				{/* Actions */}
 				<div className="flex items-center gap-1 flex-shrink-0">
-					{/* Quick connect/disconnect button */}
-					{!isActive && (
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button variant="ghost" size="icon" onClick={onConnect} disabled={isConnecting}>
-									{isConnecting ? (
-										<Loader2 className="size-4 animate-spin" />
-									) : (
-										<Play className="size-4" />
-									)}
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>Connect</TooltipContent>
-						</Tooltip>
-					)}
-
-					{isActive && (
-						<Tooltip>
-							<TooltipTrigger asChild>
-								<Button variant="ghost" size="icon" onClick={onDisconnect} disabled={isConnecting}>
-									<Unplug />
-								</Button>
-							</TooltipTrigger>
-							<TooltipContent>Disconnect</TooltipContent>
-						</Tooltip>
-					)}
-
 					{/* Test connection button */}
 					<Tooltip>
 						<TooltipTrigger asChild>

@@ -9,9 +9,11 @@ import {
 	ChevronRightIcon,
 	ChevronsLeftIcon,
 	ChevronsRightIcon,
+	MinusIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 import { Button } from "~/components/ui/button";
+import { Checkbox } from "~/components/ui/checkbox";
 import { Input } from "~/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Skeleton } from "~/components/ui/skeleton";
@@ -50,6 +52,12 @@ export interface DataGridProps<T> {
 	onStateChange?: (state: DataGridState) => void;
 	className?: string;
 	emptyMessage?: string;
+	/** Enable row selection with checkboxes */
+	selectable?: boolean;
+	/** Currently selected row indices (relative to current page) */
+	selectedRows?: Set<number>;
+	/** Called when selection changes */
+	onSelectionChange?: (selectedRows: Set<number>) => void;
 }
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 250, 500] as const;
@@ -99,6 +107,9 @@ interface DataGridContextValue<T> {
 	totalRows: number;
 	loading: boolean;
 	processedData: T[];
+	selectable: boolean;
+	selectedRows: Set<number>;
+	onSelectionChange: (selectedRows: Set<number>) => void;
 }
 
 const DataGridContext = React.createContext<DataGridContextValue<unknown> | null>(null);
@@ -171,6 +182,9 @@ function DataGrid<T extends Record<string, unknown>>({
 	onStateChange,
 	className,
 	emptyMessage = "No data available",
+	selectable = false,
+	selectedRows: externalSelectedRows,
+	onSelectionChange: externalOnSelectionChange,
 	children,
 }: DataGridProps<T> & { children?: React.ReactNode }) {
 	const [internalState, updateInternalState] = useDataGridState(externalState, onStateChange);
@@ -178,6 +192,11 @@ function DataGrid<T extends Record<string, unknown>>({
 	const updateState = onStateChange
 		? (updates: Partial<DataGridState>) => onStateChange({ ...state, ...updates })
 		: updateInternalState;
+
+	// Internal selection state (used if no external state provided)
+	const [internalSelectedRows, setInternalSelectedRows] = React.useState<Set<number>>(new Set());
+	const selectedRows = externalSelectedRows ?? internalSelectedRows;
+	const onSelectionChange = externalOnSelectionChange ?? setInternalSelectedRows;
 
 	const processedData = React.useMemo(() => processData(data, columns, state), [data, columns, state]);
 
@@ -191,6 +210,9 @@ function DataGrid<T extends Record<string, unknown>>({
 		totalRows: effectiveTotalRows,
 		loading,
 		processedData,
+		selectable,
+		selectedRows,
+		onSelectionChange,
 	};
 
 	return (
@@ -281,7 +303,8 @@ function DataGridToolbar({ className, ...props }: React.ComponentProps<"div">) {
 // ============================================================================
 
 function DataGridTable({ className, ...props }: React.ComponentProps<"div">) {
-	const { state, updateState, columns, loading, processedData, totalRows } = useDataGridContext();
+	const { state, updateState, columns, loading, processedData, selectable, selectedRows, onSelectionChange } =
+		useDataGridContext();
 
 	const startIndex = (state.page - 1) * state.pageSize;
 	const endIndex = Math.min(startIndex + state.pageSize, processedData.length);
@@ -316,8 +339,36 @@ function DataGridTable({ className, ...props }: React.ComponentProps<"div">) {
 		return <ArrowDownIcon className="size-4" />;
 	};
 
+	// Selection handlers
+	const handleSelectAll = (checked: boolean) => {
+		if (checked) {
+			const allIndices = new Set(paginatedData.map((_, idx) => idx));
+			onSelectionChange(allIndices);
+		} else {
+			onSelectionChange(new Set());
+		}
+	};
+
+	const handleSelectRow = (rowIndex: number, checked: boolean) => {
+		const newSelection = new Set(selectedRows);
+		if (checked) {
+			newSelection.add(rowIndex);
+		} else {
+			newSelection.delete(rowIndex);
+		}
+		onSelectionChange(newSelection);
+	};
+
+	const allSelected = paginatedData.length > 0 && selectedRows.size === paginatedData.length;
+	const someSelected = selectedRows.size > 0 && selectedRows.size < paginatedData.length;
+
 	if (loading) {
-		return <DataGridSkeleton columns={columns.length} rows={state.pageSize > 10 ? 10 : state.pageSize} />;
+		return (
+			<DataGridSkeleton
+				columns={selectable ? columns.length + 1 : columns.length}
+				rows={state.pageSize > 10 ? 10 : state.pageSize}
+			/>
+		);
 	}
 
 	return (
@@ -325,6 +376,18 @@ function DataGridTable({ className, ...props }: React.ComponentProps<"div">) {
 			<table className="w-full caption-bottom text-sm">
 				<thead className="border-b bg-muted/50">
 					<tr>
+						{selectable && (
+							<th className="h-10 w-12 px-4 text-left align-middle">
+								<Checkbox
+									checked={allSelected}
+									onCheckedChange={handleSelectAll}
+									aria-label="Select all rows"
+								/>
+								{someSelected && (
+									<MinusIcon className="absolute size-3 text-primary pointer-events-none" />
+								)}
+							</th>
+						)}
 						{columns.map((column) => (
 							<th
 								key={column.id}
@@ -346,33 +409,49 @@ function DataGridTable({ className, ...props }: React.ComponentProps<"div">) {
 				<tbody>
 					{paginatedData.length === 0 ? (
 						<tr>
-							<td colSpan={columns.length} className="h-24 text-center text-muted-foreground">
+							<td
+								colSpan={selectable ? columns.length + 1 : columns.length}
+								className="h-24 text-center text-muted-foreground"
+							>
 								No data available
 							</td>
 						</tr>
 					) : (
-						paginatedData.map((row, rowIndex) => (
-							<tr
-								key={rowIndex}
-								className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
-							>
-								{columns.map((column) => {
-									const typedRow = row as Record<string, unknown>;
-									const value = typedRow[column.accessorKey as string];
-									return (
-										<td key={column.id} className="p-4 align-middle max-w-xs">
-											<div className="truncate">
-												{column.cell
-													? column.cell(value as never, row as never)
-													: value !== null && value !== undefined
-														? String(value)
-														: "-"}
-											</div>
+						paginatedData.map((row, rowIndex) => {
+							const isSelected = selectedRows.has(rowIndex);
+							return (
+								<tr
+									key={rowIndex}
+									data-state={isSelected ? "selected" : undefined}
+									className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+								>
+									{selectable && (
+										<td className="w-12 px-4 align-middle">
+											<Checkbox
+												checked={isSelected}
+												onCheckedChange={(checked) => handleSelectRow(rowIndex, checked === true)}
+												aria-label={`Select row ${rowIndex + 1}`}
+											/>
 										</td>
-									);
-								})}
-							</tr>
-						))
+									)}
+									{columns.map((column) => {
+										const typedRow = row as Record<string, unknown>;
+										const value = typedRow[column.accessorKey as string];
+										return (
+											<td key={column.id} className="p-4 align-middle max-w-xs">
+												<div className="truncate">
+													{column.cell
+														? column.cell(value as never, row as never)
+														: value !== null && value !== undefined
+															? String(value)
+															: "-"}
+												</div>
+											</td>
+										);
+									})}
+								</tr>
+							);
+						})
 					)}
 				</tbody>
 			</table>

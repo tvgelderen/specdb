@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TableIcon, UnplugIcon } from "lucide-react";
 import { useTRPC } from "~/trpc/react";
 import { useTableSelection } from "~/providers/table-selection-provider";
@@ -15,6 +15,7 @@ import {
 	EmptyDescription,
 } from "~/components/ui/empty";
 import { Skeleton } from "~/components/ui/skeleton";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_layout/")({
 	component: RouteComponent,
@@ -22,6 +23,7 @@ export const Route = createFileRoute("/_layout/")({
 
 function RouteComponent() {
 	const trpc = useTRPC();
+	const queryClient = useQueryClient();
 	const { selectedTable } = useTableSelection();
 	const { activeConnection, isLoading: isConnectionLoading } = useActiveConnection();
 
@@ -39,6 +41,20 @@ function RouteComponent() {
 	// Check for active connection
 	const connectionQuery = useQuery(
 		trpc.explorer.hasActiveConnection.queryOptions({})
+	);
+
+	// Delete rows mutation
+	const deleteRowsMutation = useMutation(
+		trpc.explorer.deleteRows.mutationOptions({
+			onSuccess: (data) => {
+				toast.success(`Deleted ${data.deletedCount} row${data.deletedCount !== 1 ? "s" : ""}`);
+				// Invalidate table data to refresh
+				queryClient.invalidateQueries({ queryKey: trpc.explorer.getTableData.queryKey() });
+			},
+			onError: (error) => {
+				toast.error(`Failed to delete rows: ${error.message}`);
+			},
+		})
 	);
 
 	// Fetch table data when a table is selected
@@ -98,6 +114,21 @@ function RouteComponent() {
 		tableStructureQuery.refetch();
 	}, [tableDataQuery, tableStructureQuery]);
 
+	// Handle delete rows - MUST be before early returns
+	const handleDeleteRows = React.useCallback(
+		async (primaryKeyColumn: string, primaryKeyValues: unknown[]) => {
+			if (!selectedTable) return;
+			await deleteRowsMutation.mutateAsync({
+				schema: selectedTable.schema,
+				table: selectedTable.table,
+				database: selectedTable.database,
+				primaryKeyColumn,
+				primaryKeyValues,
+			});
+		},
+		[selectedTable, deleteRowsMutation]
+	);
+
 	// Loading state
 	const isLoading = connectionQuery.isLoading || isConnectionLoading;
 
@@ -143,6 +174,8 @@ function RouteComponent() {
 				indexesData={tableStructureQuery.data?.indexes}
 				indexesLoading={tableStructureQuery.isLoading}
 				timing={tableDataQuery.data?.timing}
+				onDeleteRows={handleDeleteRows}
+				isDeleting={deleteRowsMutation.isPending}
 			/>
 		</section>
 	);

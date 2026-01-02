@@ -25,7 +25,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "~/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "~/components/ui/select";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "~/components/ui/accordion";
 import { FilePathInput } from "~/components/ui/file-path-input";
-import { cn } from "~/lib/utils";
+import { cn, formatErrorMessage } from "~/lib/utils";
 import { useConnectionForm } from "./use-connection-form";
 import {
 	type ConnectionFormFields,
@@ -162,7 +162,7 @@ function ConnectionTestFeedback({
 					<XCircle className="size-5" />
 					<div className="flex-1">
 						<p className="font-medium">Connection failed</p>
-						<p className="text-sm opacity-80">{result.message}</p>
+						<p className="text-sm opacity-80">{formatErrorMessage(result.message)}</p>
 					</div>
 				</>
 			)}
@@ -422,12 +422,7 @@ export function ConnectionForm({
 								</div>
 							</FormField>
 
-							<FormField
-								label="Port"
-								error={form.errors.port}
-								required
-								hint={`Default: ${defaultPorts[form.fields.providerType]}`}
-							>
+							<FormField label="Port" error={form.errors.port} required>
 								<Input
 									type="number"
 									value={form.fields.port}
@@ -439,19 +434,21 @@ export function ConnectionForm({
 							</FormField>
 						</FieldGroup>
 
-						{/* Database Name */}
-						<FormField label="Database" error={form.errors.database} required>
-							<div className="relative">
-								<Database className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-								<Input
-									value={form.fields.database}
-									onChange={(e) => form.setField("database", e.target.value)}
-									placeholder="my_database"
-									className="pl-10"
-									aria-invalid={!!form.errors.database}
-								/>
-							</div>
-						</FormField>
+						{/* Database Name - not shown for postgres since we connect to a server */}
+						{form.fields.providerType !== "postgres" && (
+							<FormField label="Database" error={form.errors.database} required>
+								<div className="relative">
+									<Database className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+									<Input
+										value={form.fields.database}
+										onChange={(e) => form.setField("database", e.target.value)}
+										placeholder="my_database"
+										className="pl-10"
+										aria-invalid={!!form.errors.database}
+									/>
+								</div>
+							</FormField>
+						)}
 
 						{/* Credentials */}
 						<FieldGroup>
@@ -728,7 +725,7 @@ export function ConnectionForm({
 			)}
 
 			{/* Form Actions */}
-			<div className="flex items-center justify-end gap-3 pt-4 border-t">
+			<div className="flex items-center justify-end gap-3 pt-4">
 				{showCancel && (
 					<Button type="button" variant="outline" onClick={onCancel} disabled={isSaving}>
 						Cancel

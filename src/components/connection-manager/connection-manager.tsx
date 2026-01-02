@@ -23,7 +23,7 @@ import { ConnectionCard } from "./connection-card";
 import { ConnectionForm, type ConnectionFormFields, type ConnectionTestResult } from "~/components/connection-form";
 import { useConnection, type Connection } from "~/providers/connection-provider";
 import { useTRPC } from "~/trpc/react";
-import { cn } from "~/lib/utils";
+import { cn, formatErrorMessage } from "~/lib/utils";
 
 interface ConnectionManagerProps {
 	className?: string;
@@ -128,7 +128,7 @@ export function ConnectionManager({ className }: ConnectionManagerProps) {
 				if (result.success) {
 					toast.success(`Connection successful (${result.latencyMs}ms)`);
 				} else {
-					toast.error(`Connection failed: ${result.message}`);
+					toast.error(`Connection failed: ${formatErrorMessage(result.message)}`);
 				}
 			} catch (error) {
 				toast.error("Failed to test connection");

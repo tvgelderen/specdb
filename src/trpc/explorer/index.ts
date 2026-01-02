@@ -275,6 +275,20 @@ const deleteDatabaseInput = z.object({
 });
 
 /**
+ * Input schema for deleteRows
+ */
+const deleteRowsInput = z.object({
+	connectionId: z.string().optional(),
+	database: z.string().optional(),
+	schema: z.string().default("public"),
+	table: z.string(),
+	/** Primary key column name */
+	primaryKeyColumn: z.string(),
+	/** Primary key values of rows to delete */
+	primaryKeyValues: z.array(z.unknown()).min(1),
+});
+
+/**
  * Input schema for getDatabaseConnections
  */
 const getDatabaseConnectionsInput = z.object({
@@ -944,6 +958,75 @@ export const explorerRouter = router({
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
 					message: `Failed to delete database: ${error instanceof Error ? error.message : "Unknown error"}`,
+					cause: error,
+				});
+			} finally {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
+						logger.warn("[Explorer] Failed to disconnect provider", err);
+					});
+				}
+			}
+		}),
+
+	/**
+	 * Delete rows from a table by primary key values
+	 */
+	deleteRows: publicProcedure
+		.use(logging)
+		.use(rateLimit({ limit: 1000, windowInSeconds: 60 }))
+		.use(withUserContext)
+		.use(requirePermission("explorer.tables.write"))
+		.input(deleteRowsInput)
+		.mutation(async ({ input }) => {
+			const startTime = Date.now();
+			logger.info("[Explorer] deleteRows called", {
+				connectionId: input.connectionId,
+				database: input.database,
+				schema: input.schema,
+				table: input.table,
+				primaryKeyColumn: input.primaryKeyColumn,
+				rowCount: input.primaryKeyValues.length,
+			});
+
+			let providerInfo: ProviderInfo | null = null;
+			try {
+				providerInfo = await getProviderInfo(input.connectionId, input.database);
+
+				// For SQLite, use "main" schema if "public" was requested
+				const schema = providerInfo.type === "sqlite" && input.schema === "public" ? "main" : input.schema;
+
+				const result = await providerInfo.provider.deleteRows({
+					schema,
+					table: input.table,
+					where: [
+						{
+							column: input.primaryKeyColumn,
+							operator: "IN",
+							value: input.primaryKeyValues,
+						},
+					],
+				});
+
+				logger.info("[Explorer] deleteRows completed", {
+					table: input.table,
+					deletedCount: result.rowCount,
+					durationMs: Date.now() - startTime,
+				});
+
+				return {
+					success: true,
+					deletedCount: result.rowCount,
+					timestamp: Date.now(),
+				};
+			} catch (error) {
+				if (error instanceof TRPCError) {
+					throw error;
+				}
+				logger.error("[Explorer] deleteRows failed", error);
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: `Failed to delete rows: ${error instanceof Error ? error.message : "Unknown error"}`,
 					cause: error,
 				});
 			} finally {

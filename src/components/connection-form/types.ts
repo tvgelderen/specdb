@@ -73,10 +73,10 @@ export interface ConnectionStringMode {
 export type InputMode = "fields" | "connectionString";
 
 /**
- * SQLite config schema
+ * SQLite config schema (filepath validation is handled in superRefine based on provider type)
  */
 export const sqliteConfigSchema = z.object({
-	filepath: z.string().min(1, "File path is required"),
+	filepath: z.string(),
 	readonly: z.boolean().default(false),
 	fileMustExist: z.boolean().default(true),
 	enableWAL: z.boolean().default(true),
@@ -136,7 +136,8 @@ export const connectionFormFieldsSchema = baseConnectionFormFieldsSchema.superRe
 				path: ["port"],
 			});
 		}
-		if (!data.database || data.database.trim() === "") {
+		// Database is optional for postgres (connecting to server, not specific DB)
+		if (data.providerType !== "postgres" && (!data.database || data.database.trim() === "")) {
 			ctx.addIssue({
 				code: z.ZodIssueCode.custom,
 				message: "Database name is required",

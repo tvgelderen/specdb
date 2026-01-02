@@ -1,6 +1,10 @@
 import "dotenv/config";
 import { defineConfig } from "drizzle-kit";
-import { DB_PATH } from "~/lib/environment/private";
+
+const DB_PATH = process.env.DB_PATH;
+if (!DB_PATH) {
+	throw new Error("DB_PATH environment variable is required");
+}
 
 export default defineConfig({
 	out: "./drizzle",
