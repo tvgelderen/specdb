@@ -6,10 +6,10 @@ import type { ReactNode } from "react";
 import { DefaultCatchBoundary } from "~/components/default-catch-boundary";
 import { NotFoundPage } from "~/components/not-found";
 import { Toaster } from "~/components/ui/sonner";
-import { UserProvider } from "~/providers/user-provider";
 import { ConnectionProvider } from "~/providers/connection-provider";
 import { SettingsProvider } from "~/providers/settings-provider";
 import { TableSelectionProvider } from "~/providers/table-selection-provider";
+import { UserProvider } from "~/providers/user-provider";
 import appCss from "~/styles/app.css?url";
 import { TRPCRouter } from "~/trpc/router";
 
@@ -32,22 +32,65 @@ export const Route = createRootRouteWithContext<{
 		],
 		links: [
 			{
-				rel: "preconnect",
-				href: "https://fonts.googleapis.com",
-				crossOrigin: "anonymous",
+				rel: "apple-touch-icon",
+				sizes: "180x180",
+				href: "/apple-touch-icon_black.png",
+				media: "(prefers-color-scheme: light)",
 			},
 			{
-				rel: "preconnect",
-				href: "https://fonts.gstatic.com",
-				crossOrigin: "anonymous",
+				rel: "apple-touch-icon",
+				sizes: "180x180",
+				href: "/apple-touch-icon_white.png",
+				media: "(prefers-color-scheme: dark)",
 			},
+			{
+				rel: "icon",
+				type: "image/png",
+				sizes: "32x32",
+				href: "/favicon-32x32_black.png",
+				media: "(prefers-color-scheme: light)",
+			},
+			{
+				rel: "icon",
+				type: "image/png",
+				sizes: "32x32",
+				href: "/favicon-32x32_white.png",
+				media: "(prefers-color-scheme: dark)",
+			},
+			{
+				rel: "icon",
+				type: "image/png",
+				sizes: "16x16",
+				href: "/favicon-16x16_black.png",
+				media: "(prefers-color-scheme: light)",
+			},
+			{
+				rel: "icon",
+				type: "image/png",
+				sizes: "16x16",
+				href: "/favicon-16x16_white.png",
+				media: "(prefers-color-scheme: dark)",
+			},
+			{
+				rel: "icon",
+				href: "/favicon_black.ico",
+				media: "(prefers-color-scheme: light)",
+			},
+			{
+				rel: "icon",
+				href: "/favicon_white.ico",
+				media: "(prefers-color-scheme: dark)",
+			},
+			{ rel: "manifest", href: "/site.webmanifest" },
+			{ rel: "preconnect", href: "https://fonts.googleapis.com", crossOrigin: "anonymous" },
+			{ rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
 			{
 				rel: "stylesheet",
 				href: "https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&display=swap",
 			},
 			{
 				rel: "stylesheet",
-				href: "https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&display=swap",
+				href: "https://fonts.googleapis.com/css2?family=Geist+Mono:wght@100..900&display=swap",
 			},
 			{ rel: "stylesheet", href: appCss },
 		],

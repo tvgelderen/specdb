@@ -1,5 +1,5 @@
 import * as React from "react";
-import { MoreHorizontal, Edit2, Trash } from "lucide-react";
+import { MoreHorizontal, Edit2, Trash, Copy } from "lucide-react";
 import { Button } from "~/components/ui/button";
 import {
 	DropdownMenu,
@@ -17,6 +17,8 @@ export interface DatabaseContextMenuProps {
 	isVisible?: boolean;
 	/** Callback when rename is clicked */
 	onRename: () => void;
+	/** Callback when clone is clicked */
+	onClone: () => void;
 	/** Callback when delete is clicked */
 	onDelete: () => void;
 	/** Additional class names */
@@ -31,6 +33,7 @@ export function DatabaseContextMenu({
 	databaseName,
 	isVisible = true,
 	onRename,
+	onClone,
 	onDelete,
 	className,
 }: DatabaseContextMenuProps) {
@@ -65,6 +68,16 @@ export function DatabaseContextMenu({
 					<Edit2 />
 					Rename
 				</DropdownMenuItem>
+				<DropdownMenuItem
+					onClick={(e) => {
+						e.stopPropagation();
+						onClone();
+					}}
+				>
+					<Copy />
+					Clone
+				</DropdownMenuItem>
+				<DropdownMenuSeparator />
 				<DropdownMenuItem
 					onClick={(e) => {
 						e.stopPropagation();

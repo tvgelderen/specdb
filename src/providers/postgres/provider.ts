@@ -950,6 +950,60 @@ export class PostgresProvider {
 	}
 
 	/**
+	 * Clone (copy) a database using the WITH TEMPLATE clause
+	 * Note: This requires that no one is connected to the source database
+	 * @param sourceName - Name of the database to clone
+	 * @param targetName - Name for the new database
+	 * @param force - If true, terminate existing connections before cloning
+	 */
+	async cloneDatabase(sourceName: string, targetName: string, force = false): Promise<void> {
+		if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(sourceName) || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(targetName)) {
+			throw new Error("Invalid database name. Database names must start with a letter or underscore and contain only alphanumeric characters and underscores.");
+		}
+
+		const systemDatabases = ["postgres", "template0", "template1"];
+		if (systemDatabases.includes(sourceName.toLowerCase())) {
+			throw new Error(`Cannot clone system database: ${sourceName}`);
+		}
+
+		if (systemDatabases.includes(targetName.toLowerCase())) {
+			throw new Error(`Cannot create database with reserved name: ${targetName}`);
+		}
+
+		if (sourceName.toLowerCase() === targetName.toLowerCase()) {
+			throw new Error("Source and target database names must be different");
+		}
+
+		const connectionInfo = await this.getDatabaseConnections(sourceName);
+		if (connectionInfo.count > 0 && !force) {
+			throw new Error(
+				`Cannot clone database: ${connectionInfo.count} active connection(s) exist on source database. Use force option to terminate connections and proceed.`
+			);
+		}
+
+		if (connectionInfo.count > 0) {
+			await this.query(
+				`
+				SELECT pg_terminate_backend(pg_stat_activity.pid)
+				FROM pg_stat_activity
+				WHERE pg_stat_activity.datname = $1
+				AND pid <> pg_backend_pid()
+				`,
+				[sourceName]
+			);
+			logger.info("[PostgresProvider] Terminated connections before clone", {
+				sourceName,
+				terminatedCount: connectionInfo.count,
+			});
+		}
+
+		const sql = `CREATE DATABASE ${quoteIdentifier(targetName)} WITH TEMPLATE ${quoteIdentifier(sourceName)}`;
+		await this.query(sql);
+
+		logger.info("[PostgresProvider] Database cloned", { sourceName, targetName, force });
+	}
+
+	/**
 	 * Delete (drop) a database
 	 * Note: This requires that no one is connected to the database being dropped
 	 * @param force - If true, terminate existing connections before deleting

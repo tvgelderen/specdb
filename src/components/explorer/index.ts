@@ -35,6 +35,10 @@ export {
 	type RenameDatabaseDialogProps,
 } from "./rename-database-dialog";
 export {
+	CloneDatabaseDialog,
+	type CloneDatabaseDialogProps,
+} from "./clone-database-dialog";
+export {
 	DeleteDatabaseDialog,
 	type DeleteDatabaseDialogProps,
 } from "./delete-database-dialog";

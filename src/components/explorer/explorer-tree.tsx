@@ -14,6 +14,7 @@ import { usePrefetchExplorerData } from "./use-prefetch-explorer-data";
 import { DatabaseContextMenu } from "./database-context-menu";
 import { RenameDatabaseDialog } from "./rename-database-dialog";
 import { DeleteDatabaseDialog } from "./delete-database-dialog";
+import { CloneDatabaseDialog } from "./clone-database-dialog";
 import type {
 	ExplorerDatabaseInfo,
 	ExplorerSchemaInfo,
@@ -246,6 +247,7 @@ function DatabaseNode({
 
 	// Dialog states
 	const [renameDialogOpen, setRenameDialogOpen] = React.useState(false);
+	const [cloneDialogOpen, setCloneDialogOpen] = React.useState(false);
 	const [deleteDialogOpen, setDeleteDialogOpen] = React.useState(false);
 
 	// Query for active connections - enabled when dialogs are open
@@ -254,9 +256,9 @@ function DatabaseNode({
 			connectionId,
 			databaseName: database.name,
 		}),
-		enabled: renameDialogOpen || deleteDialogOpen,
+		enabled: renameDialogOpen || cloneDialogOpen || deleteDialogOpen,
 		// Refetch every 5 seconds while dialog is open to keep connection info fresh
-		refetchInterval: (renameDialogOpen || deleteDialogOpen) ? 5000 : false,
+		refetchInterval: (renameDialogOpen || cloneDialogOpen || deleteDialogOpen) ? 5000 : false,
 	});
 
 	// Lazy load schemas only when expanded
@@ -306,6 +308,22 @@ function DatabaseNode({
 		})
 	);
 
+	// Clone database mutation
+	const cloneMutation = useMutation(
+		trpc.explorer.cloneDatabase.mutationOptions({
+			onSuccess: (data) => {
+				toast.success(`Database cloned to "${data.targetDatabaseName}"`);
+				setCloneDialogOpen(false);
+				queryClient.invalidateQueries({
+					queryKey: trpc.explorer.listDatabases.queryKey(),
+				});
+			},
+			onError: (error) => {
+				toast.error(`Failed to clone database: ${error.message}`);
+			},
+		})
+	);
+
 	// Handle rename confirm
 	const handleRenameConfirm = React.useCallback(
 		(newName: string, force: boolean) => {
@@ -331,6 +349,19 @@ function DatabaseNode({
 		[deleteMutation, connectionId, database.name]
 	);
 
+	// Handle clone confirm
+	const handleCloneConfirm = React.useCallback(
+		(targetName: string, force: boolean) => {
+			cloneMutation.mutate({
+				connectionId,
+				sourceDatabaseName: database.name,
+				targetDatabaseName: targetName,
+				force,
+			});
+		},
+		[cloneMutation, connectionId, database.name]
+	);
+
 	// Prefetch tables for all schemas when schemas are loaded
 	// This is triggered when the database is expanded and schemas are fetched
 	React.useEffect(() => {
@@ -353,11 +384,12 @@ function DatabaseNode({
 				onToggle={onToggle}
 				onSelect={onSelect}
 				actions={
-					// SQLite doesn't support rename/delete database operations
+					// SQLite doesn't support rename/clone/delete database operations
 					providerType !== "sqlite" ? (
 						<DatabaseContextMenu
 							databaseName={database.name}
 							onRename={() => setRenameDialogOpen(true)}
+							onClone={() => setCloneDialogOpen(true)}
 							onDelete={() => setDeleteDialogOpen(true)}
 						/>
 					) : undefined
@@ -434,6 +466,18 @@ function DatabaseNode({
 				databaseName={database.name}
 				onConfirm={handleRenameConfirm}
 				isRenaming={renameMutation.isPending}
+				isCheckingConnections={connectionsQuery.isLoading}
+				activeConnectionCount={connectionsQuery.data?.count ?? 0}
+				activeConnections={connectionsQuery.data?.connections ?? []}
+			/>
+
+			{/* Clone Database Dialog */}
+			<CloneDatabaseDialog
+				open={cloneDialogOpen}
+				onOpenChange={setCloneDialogOpen}
+				sourceDatabaseName={database.name}
+				onConfirm={handleCloneConfirm}
+				isCloning={cloneMutation.isPending}
 				isCheckingConnections={connectionsQuery.isLoading}
 				activeConnectionCount={connectionsQuery.data?.count ?? 0}
 				activeConnections={connectionsQuery.data?.connections ?? []}

@@ -178,7 +178,7 @@ export function TreeNode({
 				)}
 
 				{/* Label */}
-				<span className="truncate text-sm flex-1">{label}</span>
+				<span className="truncate text-sm flex-1 min-w-0">{label}</span>
 
 				{/* Loading indicator */}
 				{isLoading && (

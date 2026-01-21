@@ -275,6 +275,17 @@ const deleteDatabaseInput = z.object({
 });
 
 /**
+ * Input schema for cloneDatabase
+ */
+const cloneDatabaseInput = z.object({
+	connectionId: z.string().optional(),
+	sourceDatabaseName: z.string().min(1),
+	targetDatabaseName: z.string().min(1),
+	/** If true, terminate existing connections on source database before cloning */
+	force: z.boolean().optional().default(false),
+});
+
+/**
  * Input schema for deleteRows
  */
 const deleteRowsInput = z.object({
@@ -958,6 +969,74 @@ export const explorerRouter = router({
 				throw new TRPCError({
 					code: "INTERNAL_SERVER_ERROR",
 					message: `Failed to delete database: ${error instanceof Error ? error.message : "Unknown error"}`,
+					cause: error,
+				});
+			} finally {
+				if (providerInfo) {
+					await providerInfo.provider.disconnect().catch((err) => {
+						logger.warn("[Explorer] Failed to disconnect provider", err);
+					});
+				}
+			}
+		}),
+
+	/**
+	 * Clone (copy) a database using the WITH TEMPLATE clause (PostgreSQL only)
+	 */
+	cloneDatabase: publicProcedure
+		.use(logging)
+		.use(rateLimit({ limit: 1000, windowInSeconds: 60 }))
+		.use(withUserContext)
+		.use(requirePermission("explorer.databases.write"))
+		.input(cloneDatabaseInput)
+		.mutation(async ({ input }) => {
+			const startTime = Date.now();
+			logger.info("[Explorer] cloneDatabase called", {
+				connectionId: input.connectionId,
+				sourceDatabaseName: input.sourceDatabaseName,
+				targetDatabaseName: input.targetDatabaseName,
+				force: input.force,
+			});
+
+			let providerInfo: ProviderInfo | null = null;
+			try {
+				providerInfo = await getProviderInfo(input.connectionId);
+
+				if (providerInfo.type === "sqlite") {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "cloneDatabase is not supported for SQLite. Copy the database file directly.",
+					});
+				}
+
+				const pgProvider = providerInfo.provider as PostgresProvider;
+				await pgProvider.cloneDatabase(
+					input.sourceDatabaseName,
+					input.targetDatabaseName,
+					input.force
+				);
+
+				logger.info("[Explorer] cloneDatabase completed", {
+					sourceDatabaseName: input.sourceDatabaseName,
+					targetDatabaseName: input.targetDatabaseName,
+					force: input.force,
+					durationMs: Date.now() - startTime,
+				});
+
+				return {
+					success: true,
+					sourceDatabaseName: input.sourceDatabaseName,
+					targetDatabaseName: input.targetDatabaseName,
+					timestamp: Date.now(),
+				};
+			} catch (error) {
+				if (error instanceof TRPCError) {
+					throw error;
+				}
+				logger.error("[Explorer] cloneDatabase failed", error);
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: `Failed to clone database: ${error instanceof Error ? error.message : "Unknown error"}`,
 					cause: error,
 				});
 			} finally {
